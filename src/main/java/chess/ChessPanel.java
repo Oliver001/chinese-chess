@@ -5,6 +5,7 @@ import javax.swing.border.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.List;
+import java.util.prefs.Preferences;
 
 public class ChessPanel extends JPanel {
 
@@ -81,6 +82,62 @@ public class ChessPanel extends JPanel {
     // ---- 空棋盘模式（未开始对局）----
     private boolean idleMode = false;  // true=空棋盘等待状态，不允许走棋
 
+    // ---- 引擎配置持久化 ----
+    private static final Preferences PREFS = Preferences.userNodeForPackage(ChessPanel.class);
+    private static final String PREF_ENGINE_TYPE = "engineType";
+    private static final String PREF_ENGINE_PATH = "enginePath";
+
+    /** 保存当前引擎配置到系统Preferences（跨启动持久化） */
+    private void saveEngineConfig() {
+        PREFS.put(PREF_ENGINE_TYPE, currentEngineType.name());
+        PREFS.put(PREF_ENGINE_PATH, currentEnginePath);
+    }
+
+    /**
+     * 从系统Preferences加载引擎配置，并在后台线程自动连接外部引擎。
+     * 需在UI初始化完成后调用（保证 engineMenuItem 等控件已创建）。
+     */
+    private void loadEngineConfig() {
+        String typeName = PREFS.get(PREF_ENGINE_TYPE, EngineSelectDialog.EngineType.BUILTIN.name());
+        String path     = PREFS.get(PREF_ENGINE_PATH, "");
+        EngineSelectDialog.EngineType savedType;
+        try {
+            savedType = EngineSelectDialog.EngineType.valueOf(typeName);
+        } catch (Exception e) {
+            savedType = EngineSelectDialog.EngineType.BUILTIN;
+        }
+        if (savedType == EngineSelectDialog.EngineType.BUILTIN || path.isEmpty()) return;
+
+        // 异步连接上次选择的外部引擎
+        final EngineSelectDialog.EngineType finalType = savedType;
+        final String finalPath = path;
+        ExternalEngine.Protocol proto = finalType == EngineSelectDialog.EngineType.EXTERNAL_UCCI
+                ? ExternalEngine.Protocol.UCCI : ExternalEngine.Protocol.UCI;
+        ExternalEngine eng = new ExternalEngine(finalPath, proto);
+        if (engineMenuItem != null)
+            engineMenuItem.setText("AI引擎: 连接中...(E)");
+        new Thread(() -> {
+            boolean ok = false;
+            try { ok = eng.start(); } catch (Exception ignored) {}
+            final boolean success = ok;
+            SwingUtilities.invokeLater(() -> {
+                if (success) {
+                    externalEngine = eng;
+                    currentEngineType = finalType;
+                    currentEnginePath = finalPath;
+                    if (engineMenuItem != null)
+                        engineMenuItem.setText("AI引擎: " + eng.getName() + "(E)");
+                } else {
+                    eng.stop();
+                    currentEngineType = EngineSelectDialog.EngineType.BUILTIN;
+                    currentEnginePath = "";
+                    if (engineMenuItem != null)
+                        engineMenuItem.setText("AI引擎: 内置(E)");
+                }
+            });
+        }, "engine-autoconnect").start();
+    }
+
     // ===================== 构造 =====================
     /** 空棋盘构造（启动时用）：显示空棋盘，等待用户从菜单选择操作 */
     public ChessPanel() {
@@ -130,6 +187,8 @@ public class ChessPanel extends JPanel {
             });
         });
         startClock();
+        // 加载上次保存的引擎配置（UI初始化完毕后，在EDT中延迟执行）
+        SwingUtilities.invokeLater(this::loadEngineConfig);
     }
 
     /** 带参构造：由开局对话框传入设置 */
@@ -1016,6 +1075,7 @@ public class ChessPanel extends JPanel {
                         if (engineMenuItem != null)
                             engineMenuItem.setText("AI引擎: " + engName + "(E)");
                         setStatus("已切换到外部引擎：" + engName, false);
+                        saveEngineConfig();  // 持久化保存
                         JOptionPane.showMessageDialog(this,
                                 "✅ 外部引擎连接成功：" + engName + "\n协议：" + eng.getProtocol(),
                                 "引擎就绪", JOptionPane.INFORMATION_MESSAGE);
@@ -1035,6 +1095,7 @@ public class ChessPanel extends JPanel {
             currentEnginePath = "";
             if (engineMenuItem != null) engineMenuItem.setText("AI引擎: 内置(E)");
             setStatus("已切换回内置AI引擎", false);
+            saveEngineConfig();  // 持久化保存
         }
     }
 

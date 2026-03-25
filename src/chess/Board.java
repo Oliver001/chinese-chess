@@ -270,9 +270,18 @@ public class Board {
         return false;
     }
 
-    /** 生成简单FEN字符串 */
+    /**
+     * 生成皮卡鱼/UCI-Cyclone标准FEN字符串。
+     * 皮卡鱼FEN规则（来自源码注释）：
+     *   "Each rank is described, starting with rank 9 and ending with rank 0."
+     *   rank0 = 红方底线(WHITE) = 内部 row9
+     *   rank9 = 黑方底线(BLACK) = 内部 row0
+     * 因此 FEN 段顺序从内部 row0 到 row9（即 rank9 降到 rank0）。
+     * 走棋方：w=红方(WHITE), b=黑方(BLACK)。
+     */
     public String toFEN(boolean redTurn) {
         StringBuilder sb = new StringBuilder();
+        // FEN从 rank9(内部row0) 到 rank0(内部row9)，即内部 r=0..9 顺序输出
         for (int r = 0; r < 10; r++) {
             int empty = 0;
             for (int c = 0; c < 9; c++) {
@@ -286,7 +295,7 @@ public class Board {
             if (empty > 0) sb.append(empty);
             if (r < 9) sb.append('/');
         }
-        // 皮卡鱼(UCI-Cyclone)要求走棋方用 w/b，不能用 r/b
+        // UCI标准：w=红方(WHITE), b=黑方(BLACK)
         sb.append(redTurn ? " w" : " b");
         return sb.toString();
     }
@@ -306,15 +315,21 @@ public class Board {
         return p.isRed ? Character.toUpperCase(c) : c;
     }
 
-    /** 从FEN恢复棋盘 */
+    /**
+     * 从皮卡鱼/UCI-Cyclone标准FEN恢复棋盘。
+     * FEN段0=rank9=内部row0（黑方底线），段9=rank0=内部row9（红方底线）。
+     * 直接用 FEN段index 作为内部row，无需翻转。
+     */
     public boolean fromFEN(String fen) {
         try {
-            String[] parts = fen.trim().split(" ");
+            String[] parts = fen.trim().split("\\s+");
             String[] rows = parts[0].split("/");
             for(int r=0;r<10;r++) for(int c=0;c<9;c++) grid[r][c]=null;
-            for (int r = 0; r < 10; r++) {
+            // FEN段index直接对应内部row（段0=内部row0=黑方底线=rank9）
+            for (int r = 0; r < Math.min(10, rows.length); r++) {
                 int c = 0;
                 for (char ch : rows[r].toCharArray()) {
+                    if (c >= 9) break;
                     if (Character.isDigit(ch)) { c += ch-'0'; }
                     else {
                         boolean red = Character.isUpperCase(ch);

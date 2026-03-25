@@ -242,19 +242,26 @@ public class ExternalEngine {
 
     /**
      * UCI-Cyclone坐标字符串 → 内部坐标 [fromRow, fromCol, toRow, toCol]
-     * 皮卡鱼行号与内部坐标完全一致（行0=黑方底线，行9=红方底线），无需翻转。
-     * 示例：c3c4 → [3, 2, 4, 2]
+     *
+     * 皮卡鱼坐标系（来自源码注释）：
+     *   rank0 = 红方底线(WHITE) = 内部 row9
+     *   rank9 = 黑方底线(BLACK) = 内部 row0
+     * 转换：internal_row = 9 - pikafish_rank
+     *
+     * 示例：c3c4 → pikafish rank3→rank4 → 内部 [6,2]→[5,2]（红兵向前推进）
      */
     public static int[] iccsToInternal(String mv) {
         if (mv == null || mv.length() < 4) return null;
         try {
-            int fromCol = mv.charAt(0) - 'a';
-            int fromRow = mv.charAt(1) - '0';
-            int toCol   = mv.charAt(2) - 'a';
-            int toRow   = mv.charAt(3) - '0';
+            int fromCol      = mv.charAt(0) - 'a';
+            int pikafishFrom = mv.charAt(1) - '0';
+            int toCol        = mv.charAt(2) - 'a';
+            int pikafishTo   = mv.charAt(3) - '0';
             // 范围校验
-            if (fromCol < 0 || fromCol > 8 || fromRow < 0 || fromRow > 9) return null;
-            if (toCol   < 0 || toCol   > 8 || toRow   < 0 || toRow   > 9) return null;
+            if (fromCol < 0 || fromCol > 8 || pikafishFrom < 0 || pikafishFrom > 9) return null;
+            if (toCol   < 0 || toCol   > 8 || pikafishTo   < 0 || pikafishTo   > 9) return null;
+            int fromRow = 9 - pikafishFrom;
+            int toRow   = 9 - pikafishTo;
             return new int[]{fromRow, fromCol, toRow, toCol};
         } catch (Exception e) {
             return null;
@@ -263,11 +270,12 @@ public class ExternalEngine {
 
     /**
      * 内部坐标 → UCI-Cyclone坐标字符串
-     * 示例：[3, 2, 4, 2] → c3c4
+     * pikafish_rank = 9 - internal_row
+     * 示例：内部 [6,2]→[5,2] → c3c4
      */
     public static String internalToIccs(int fr, int fc, int tr, int tc) {
-        return "" + (char)('a' + fc) + (char)('0' + fr)
-                  + (char)('a' + tc) + (char)('0' + tr);
+        return "" + (char)('a' + fc) + (char)('0' + (9 - fr))
+                  + (char)('a' + tc) + (char)('0' + (9 - tr));
     }
 
     public boolean isReady()      { return ready; }
