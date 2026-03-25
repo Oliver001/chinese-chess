@@ -20,10 +20,10 @@ import java.util.function.BiConsumer;
  *   帅/将：只能在己方九宫（3×3）
  *   仕/士：只能在己方九宫
  *   相/象：只能在己方半边（不过河）
- *   兵/卒：不能放在己方卒林线以内（己方腹地）
- *           坐标：行0=黑方底线，行9=红方底线，行5=红方卒林线，行4=黑方卒林线
- *           红兵可放行0-5（对方区域+卒林线），不能放行6-9（己方腹地）
- *           黑卒可放行4-9（对方区域+卒林线），不能放行0-3（己方腹地）
+ *   兵/卒：不能放在己方腹地深处
+ *           坐标：行0=黑方底线，行9=红方底线
+ *           红兵初始位置：行6，合法区域行0-6（含卒林线行6），不能放行7-9
+ *           黑卒初始位置：行3，合法区域行3-9（含卒林线行3），不能放行0-2
  *   马/车/炮：全盘任意位置
  *
  * 交互方式：
@@ -51,7 +51,7 @@ public class EditBoardDialog extends JDialog {
     private final Board editBoard = new Board();
     private boolean editRedTurn = true;
     /** 棋盘是否翻转（联动主界面翻转状态：翻转=红方在下） */
-    private final boolean boardFlipped;
+    private boolean boardFlipped;
 
     // ---- 拖拽状态 ----
     private Piece dragPiece = null;
@@ -545,12 +545,12 @@ public class EditBoardDialog extends JDialog {
                 if (piece.isRed) return row >= 5;
                 else             return row <= 4;
             case PAWN:
-                // 兵/卒不能放在己方腹地（卒林线以内）
-                // 行5=红方卒林线，行4=黑方卒林线
-                // 红兵合法区域：行0-5（对方区域+卒林线），不能放行6-9
-                // 黑卒合法区域：行4-9（对方区域+卒林线），不能放行0-3
-                if (piece.isRed) return row <= 5;
-                else             return row >= 4;
+                // 兵/卒不能放在己方腹地深处（卒林线以后）
+                // 坐标：行0=黑方底线，行9=红方底线
+                // 红兵初始位置行6（FEN P1P1P1P1P），合法区域行0-6（含初始卒林线行6）
+                // 黑卒初始位置行3（FEN p1p1p1p1p），合法区域行3-9（含初始卒林线行3）
+                if (piece.isRed) return row <= 6; // 不能放行7-9（己方腹地）
+                else             return row >= 3; // 不能放行0-2（己方腹地）
             default:
                 return true; // 马/车/炮 全盘任意
         }
@@ -566,7 +566,8 @@ public class EditBoardDialog extends JDialog {
             case HORSE:    return side + (isRed?"马":"馬") + "：最多" + max + "个，全盘任意";
             case ROOK:     return side + (isRed?"车":"車") + "：最多" + max + "个，全盘任意";
             case CANNON:   return side + (isRed?"炮":"砲") + "：最多" + max + "个，全盘任意";
-            case PAWN:     return side + (isRed?"兵":"卒") + "：最多" + max + "个，只能在卒林线及以前（含过河）";
+            case PAWN:     return side + (isRed?"兵":"卒") + "：最多" + max + "个，"
+                               + (isRed ? "可放行0-6（含卒林线，可达对方底线）" : "可放行3-9（含卒林线，可达对方底线）");
             default:       return "";
         }
     }
@@ -640,9 +641,25 @@ public class EditBoardDialog extends JDialog {
             onCancel.run();
         });
 
-        btns.add(clearBtn); btns.add(resetBtn); btns.add(cancelBtn); btns.add(confirmBtn);
+        JButton flipBtn = makeBtn("⇅ 翻转棋盘", this::flipBoard);
+
+        btns.add(flipBtn); btns.add(clearBtn); btns.add(resetBtn); btns.add(cancelBtn); btns.add(confirmBtn);
         bottom.add(btns, BorderLayout.EAST);
         return bottom;
+    }
+
+    /** 翻转棋盘：切换 boardFlipped 状态，并同步更新棋子库顺序 */
+    private void flipBoard() {
+        boardFlipped = !boardFlipped;
+        // 重新排列 paletteContainer 中的红黑两组顺序
+        Component[] comps = paletteContainer.getComponents();
+        paletteContainer.removeAll();
+        // comps[0] 和 comps[1] 分别是"翻转前"的上下两组
+        paletteContainer.add(comps[1]);
+        paletteContainer.add(comps[0]);
+        paletteContainer.revalidate();
+        paletteContainer.repaint();
+        boardPanel.repaint();
     }
 
     private JButton makeBtn(String txt, Runnable action) {

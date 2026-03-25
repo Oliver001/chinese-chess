@@ -28,6 +28,13 @@ public class ChessPanel extends JPanel {
     private final AIEngine  ai = new AIEngine();
     private final SoundManager sound = new SoundManager();
 
+    // ---- 外部引擎（UCI/UCCI），null=使用内置AI ----
+    private ExternalEngine externalEngine = null;
+    private EngineSelectDialog.EngineType currentEngineType = EngineSelectDialog.EngineType.BUILTIN;
+    private String currentEnginePath = "";
+    /** 引擎名称（菜单显示用） */
+    private JMenuItem engineMenuItem; // 用于动态更新显示
+
     // ---- 交互 ----
     private int selRow = -1, selCol = -1;
     private List<int[]> legalMoves = null;
@@ -454,6 +461,17 @@ public class ChessPanel extends JPanel {
         loadFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
         loadFenItem.addActionListener(e -> loadFEN());
 
+        JMenuItem exitItem = new JMenuItem("退出(Q)");
+        exitItem.setMnemonic('Q');
+        exitItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F4, InputEvent.ALT_DOWN_MASK));
+        exitItem.addActionListener(e -> {
+            int choice = JOptionPane.showConfirmDialog(
+                    SwingUtilities.getWindowAncestor(this),
+                    "确认退出游戏？", "退出",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (choice == JOptionPane.YES_OPTION) System.exit(0);
+        });
+
         gameMenu.add(startItem);
         gameMenu.add(undoItem);
         gameMenu.add(pauseMenuItem);
@@ -463,6 +481,8 @@ public class ChessPanel extends JPanel {
         gameMenu.add(new JSeparator());
         gameMenu.add(saveFenItem);
         gameMenu.add(loadFenItem);
+        gameMenu.add(new JSeparator());
+        gameMenu.add(exitItem);
 
         // ── 设置 ──
         JMenu settingsMenu = new JMenu("设置(S)");
@@ -472,11 +492,17 @@ public class ChessPanel extends JPanel {
         diffItem.setMnemonic('D');
         diffItem.addActionListener(e -> showDifficultyDialog());
 
+        // 引擎选择
+        engineMenuItem = new JMenuItem("AI引擎: 内置(E)");
+        engineMenuItem.setMnemonic('E');
+        engineMenuItem.addActionListener(e -> showEngineSelectDialog());
+
         // 音效开关（CheckBox菜单项）
         JCheckBoxMenuItem soundItem = new JCheckBoxMenuItem("音效(M)", sound.isEnabled());
         soundItem.setMnemonic('M');
         soundItem.addActionListener(e -> sound.setEnabled(soundItem.isSelected()));
 
+        settingsMenu.add(engineMenuItem);
         settingsMenu.add(diffItem);
         settingsMenu.add(soundItem);
 
@@ -625,6 +651,65 @@ public class ChessPanel extends JPanel {
 
         String diffLabel = gs.difficulty.label;
         int timeMs = gs.difficulty.aiTimeMs;
+
+        // ★ 判断使用外部引擎还是内置AI
+        if (externalEngine != null && externalEngine.isReady()) {
+            // ── 外部引擎路径 ──
+            setStatus("外部引擎思考中... [" + externalEngine.getName() + "]", false);
+            sourceLabel.setText("<html><center>🔌 " + externalEngine.getName() + "</center></html>");
+            mateLabel.setText(" ");
+            mateLabel.setBackground(new Color(0xF5E6C8));
+
+            final Board boardSnapshot = new Board();
+            for (int r = 0; r < 10; r++)
+                for (int c = 0; c < 9; c++)
+                    boardSnapshot.grid[r][c] = gs.board.grid[r][c] != null
+                            ? gs.board.grid[r][c].copy() : null;
+            final boolean redTurnSnap = gs.redTurn;
+
+            externalEngine.requestMove(boardSnapshot, redTurnSnap, timeMs,
+                mv -> SwingUtilities.invokeLater(() -> {
+                    animTimer.stop();
+                    renderSnapshot = null;
+                    if (mv != null && mv[0] != -1) {
+                        boolean wasRed = gs.redTurn;
+                        lastFR=mv[0]; lastFC=mv[1]; lastTR=mv[2]; lastTC=mv[3];
+                        boolean isCapture = gs.board.getPiece(mv[2], mv[3]) != null;
+                        Piece cap = gs.doMove(mv[0], mv[1], mv[2], mv[3]);
+                        gs.applyIncrement(wasRed);
+                        aiThinking = false;
+                        if (isCapture) sound.playCapture(); else sound.playMove();
+                        updateNotation();
+                        updateAdvantage(Evaluator.evaluate(gs.board));
+                        checkGameOver(cap);
+                    } else {
+                        aiThinking = false;
+                        gs.gameOver = true;
+                        gs.saveGame("AI认负");
+                        setStatus("外部引擎无子可走，你赢了！", true);
+                        sound.playWin();
+                    }
+                    boardPanel.repaint();
+                }),
+                info -> {
+                    // 解析 info 行中的 score cp
+                    if (info.contains("score cp")) {
+                        try {
+                            int idx = info.indexOf("score cp") + 9;
+                            String[] parts = info.substring(idx).trim().split("\\s+");
+                            int cp = Integer.parseInt(parts[0]);
+                            // UCI中cp是走棋方视角（正=当前方优），转换为红方视角
+                            int boardScore = redTurnSnap ? cp : -cp;
+                            SwingUtilities.invokeLater(() -> updateAdvantage(boardScore));
+                        } catch (Exception ignored) {}
+                    }
+                    String finalInfo = info;
+                    SwingUtilities.invokeLater(() -> sourceLabel.setText(
+                        "<html><center>" + finalInfo.replace("<","&lt;") + "</center></html>"));
+                });
+            return; // 外部引擎路径到此结束，剩余代码走内置AI
+        }
+
         setStatus("AI 思考中... [" + diffLabel + "]", false);
         sourceLabel.setText("<html><center>🔍 查询云库/开局库...</center></html>");
         mateLabel.setText(" ");
@@ -895,6 +980,62 @@ public class ChessPanel extends JPanel {
             // 取消编辑：恢复暂停状态
             paused = wasPaused;
         }).setVisible(true);
+    }
+
+    // ===================== 引擎选择 =====================
+    private void showEngineSelectDialog() {
+        EngineSelectDialog dlg = new EngineSelectDialog(this, currentEngineType, currentEnginePath);
+        dlg.setVisible(true);
+        if (!dlg.isConfirmed()) return;
+
+        EngineSelectDialog.EngineType newType = dlg.getSelectedType();
+        String newPath = dlg.getEnginePath();
+
+        // 如果切换到外部引擎
+        if (newType != EngineSelectDialog.EngineType.BUILTIN) {
+            if (newPath.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "请先选择引擎文件！", "提示", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            // 关闭旧引擎
+            if (externalEngine != null) { externalEngine.stop(); externalEngine = null; }
+            ExternalEngine.Protocol proto = newType == EngineSelectDialog.EngineType.EXTERNAL_UCCI
+                    ? ExternalEngine.Protocol.UCCI : ExternalEngine.Protocol.UCI;
+            ExternalEngine eng = new ExternalEngine(newPath, proto);
+            setStatus("正在连接引擎...", false);
+            new Thread(() -> {
+                boolean ok = false;
+                try { ok = eng.start(); } catch (Exception e) { /* ignore */ }
+                final boolean success = ok;
+                final String engName = eng.getName();
+                SwingUtilities.invokeLater(() -> {
+                    if (success) {
+                        externalEngine = eng;
+                        currentEngineType = newType;
+                        currentEnginePath = newPath;
+                        if (engineMenuItem != null)
+                            engineMenuItem.setText("AI引擎: " + engName + "(E)");
+                        setStatus("已切换到外部引擎：" + engName, false);
+                        JOptionPane.showMessageDialog(this,
+                                "✅ 外部引擎连接成功：" + engName + "\n协议：" + eng.getProtocol(),
+                                "引擎就绪", JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        eng.stop();
+                        setStatus("引擎连接失败，继续使用内置AI", false);
+                        JOptionPane.showMessageDialog(this,
+                                "❌ 外部引擎连接失败！\n请检查引擎路径和协议类型。\n继续使用内置AI。",
+                                "连接失败", JOptionPane.ERROR_MESSAGE);
+                    }
+                });
+            }, "engine-connect").start();
+        } else {
+            // 切回内置AI
+            if (externalEngine != null) { externalEngine.stop(); externalEngine = null; }
+            currentEngineType = EngineSelectDialog.EngineType.BUILTIN;
+            currentEnginePath = "";
+            if (engineMenuItem != null) engineMenuItem.setText("AI引擎: 内置(E)");
+            setStatus("已切换回内置AI引擎", false);
+        }
     }
 
     // ===================== FEN =====================
