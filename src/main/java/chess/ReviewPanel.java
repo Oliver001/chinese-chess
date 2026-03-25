@@ -170,6 +170,8 @@ public class ReviewPanel extends JPanel {
             BorderFactory.createLineBorder(new Color(0xC8A060)), "棋谱",
             TitledBorder.CENTER, TitledBorder.TOP,
             new Font("宋体", Font.BOLD, 12), new Color(0x8B4513)));
+        listScroll.setPreferredSize(new Dimension(SIDE_W, 220));
+        listScroll.setMinimumSize(new Dimension(SIDE_W, 100));
         right.add(listScroll, BorderLayout.CENTER);
 
         // 底部：优势折线图 + 翻页按钮
@@ -221,7 +223,7 @@ public class ReviewPanel extends JPanel {
             BorderFactory.createLineBorder(new Color(0xC8A060)), "AI分析建议",
             TitledBorder.CENTER, TitledBorder.TOP,
             new Font("宋体", Font.BOLD, 11), new Color(0x8B4513)));
-        analysisSp.setPreferredSize(new Dimension(SIDE_W, 110));
+        analysisSp.setPreferredSize(new Dimension(SIDE_W, 95));
 
         JPanel navBtnPanel = new JPanel(new BorderLayout(0, 3));
         navBtnPanel.setOpaque(false);
