@@ -2,6 +2,7 @@ package chess;
 
 import javax.swing.*;
 import javax.swing.border.*;
+import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.*;
@@ -38,8 +39,8 @@ public class ReviewPanel extends JPanel {
     // ---- UI ----
     private JPanel boardPanel;
     private JPanel rightPanel;         // 右侧信息面板（动态宽度）
-    private JList<String> moveList;
-    private DefaultListModel<String> moveListModel;
+    private JTable notationTable;
+    private DefaultTableModel notationModel;
     private JLabel stepLabel;
     private JLabel resultLabel;
     private ScoreChart scoreChart;
@@ -117,26 +118,54 @@ public class ReviewPanel extends JPanel {
         info.add(dateLabel);
         right.add(info, BorderLayout.NORTH);
 
-        // 中：走法列表（可点击）
-        moveListModel = new DefaultListModel<>();
-        moveListModel.addElement("  初始局面");
-        for (int i = 0; i < record.notations.size(); i++) {
-            String nota = record.notations.get(i);
-            String prefix = (i%2==0) ? String.format("%3d. ", i/2+1) : "     ";
-            moveListModel.addElement(prefix + nota);
-        }
-        moveList = new JList<>(moveListModel);
-        moveList.setFont(new Font("宋体", Font.PLAIN, 12));
-        moveList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        moveList.setBackground(new Color(0xFFFAF0));
-        moveList.setFixedCellHeight(20);
-        moveList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                int idx = moveList.getSelectedIndex();
-                if (idx >= 0) gotoStep(idx);
+        // 中：棋谱 6 列表格（每行两回合：序1 红1 黑1 序2 红2 黑2）
+        notationModel = new DefaultTableModel(
+                new Object[]{"序", "红方", "黑方", "序", "红方", "黑方"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        notationTable = new JTable(notationModel);
+        notationTable.setFont(new Font("宋体", Font.PLAIN, 12));
+        notationTable.setRowHeight(20);
+        notationTable.setShowGrid(false);
+        notationTable.setIntercellSpacing(new Dimension(0, 0));
+        notationTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        notationTable.setBackground(new Color(0xFFFAF0));
+        notationTable.setSelectionBackground(new Color(0xFFE0A0));
+        notationTable.setSelectionForeground(Color.BLACK);
+        // 列宽：序号列窄，走法列等分
+        TableColumnModel tcm = notationTable.getColumnModel();
+        tcm.getColumn(0).setPreferredWidth(28); tcm.getColumn(0).setMaxWidth(36);
+        tcm.getColumn(3).setPreferredWidth(28); tcm.getColumn(3).setMaxWidth(36);
+        // 填充棋谱数据（与 ChessPanel.updateNotation 逻辑一致）
+        refreshNotationTable();
+        // 点击行跳转到对应步
+        notationTable.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                int row = notationTable.rowAtPoint(e.getPoint());
+                int col = notationTable.columnAtPoint(e.getPoint());
+                if (row < 0) return;
+                // 列 0-2 → 第一回合两手；列 3-5 → 第二回合两手
+                // 计算点击对应的步数（1-based，+1 因为 step0=初始局面）
+                // 每行 row 对应步：row*4 开始（若黑先则有偏移）
+                int offset = record.notations.isEmpty() ? 0
+                        : (isFirstMoveRed() ? 0 : 1);
+                int baseStep;
+                if (col <= 2) {
+                    // 第一组：偶数位 = 红方(offset=0)或空(offset=1)
+                    int idx = row * 4;         // padded 索引
+                    int notaIdx = idx - offset; // notations 真实索引
+                    if (notaIdx < 0 || notaIdx >= record.notations.size()) return;
+                    baseStep = notaIdx + 1;
+                } else {
+                    int idx = row * 4 + 2;
+                    int notaIdx = idx - offset;
+                    if (notaIdx < 0 || notaIdx >= record.notations.size()) return;
+                    baseStep = notaIdx + 1;
+                }
+                gotoStep(baseStep);
             }
         });
-        JScrollPane listScroll = new JScrollPane(moveList);
+        JScrollPane listScroll = new JScrollPane(notationTable);
         listScroll.setBorder(BorderFactory.createTitledBorder(
             BorderFactory.createLineBorder(new Color(0xC8A060)), "棋谱",
             TitledBorder.CENTER, TitledBorder.TOP,
@@ -271,13 +300,13 @@ public class ReviewPanel extends JPanel {
                 String turnStr = finalRedTurn ? "红方" : "黑方";
                 sb.append("▶ 当前局面：").append(turnStr).append("走棋\n");
 
-                // 格式化最优走法
+                // 格式化最优走法（中文棋谱格式）
                 if (stats != null) {
-                    sb.append(String.format("▶ 最优着法 [深度%d]：", stats.depth));
-                    // 从棋盘获取棋子名称
-                    Piece p = snapBoard.grid[bestMove[0]][bestMove[1]];
-                    if (p != null) sb.append(p.getDisplay());
-                    sb.append(String.format("(%d,%d)→(%d,%d)\n", bestMove[0]+1,bestMove[1]+1,bestMove[2]+1,bestMove[3]+1));
+                    // 最优着法用中文棋谱表示
+                    String bestMoveStr = GameState.buildNotationStatic(
+                            bestMove[0], bestMove[1], bestMove[2], bestMove[3],
+                            snapBoard.grid, finalRedTurn);
+                    sb.append(String.format("▶ 最优着法 [深度%d]：%s\n", stats.depth, bestMoveStr));
 
                     // 分数解读
                     int sc = stats.boardScore;
@@ -287,16 +316,24 @@ public class ReviewPanel extends JPanel {
                     else if (sc < -300) sb.append(String.format("▶ 局面评分：黑方领先 %d 分\n", -sc));
                     else sb.append(String.format("▶ 局面评分：接近均势（%+d）\n", sc));
 
-                    // PV主线
+                    // PV 主线：格式 "▶ 预测后续：最优着法 → 对手 → AI → ..."
                     if (stats.pvLine != null && !stats.pvLine.isEmpty()) {
-                        sb.append("▶ 预测后续：\n");
-                        String[] pvSteps = stats.pvLine.split("\n");
-                        for (String step : pvSteps) {
-                            sb.append("   ").append(step
-                                    .replace("▶ AI: ", (finalRedTurn?"红 ":"黑 "))
-                                    .replace("△ 对手: ", (!finalRedTurn?"红 ":"黑 ")))
-                              .append("\n");
+                        // pvLine 每行：  "▶ AI: 炮二平五"  或  "△ 对手: 马8进7"
+                        // 去掉前缀，用 → 连接成单行，最优着法作为第一步
+                        java.util.List<String> pvMoves = new java.util.ArrayList<>();
+                        pvMoves.add(bestMoveStr);
+                        for (String pvl : stats.pvLine.split("\n")) {
+                            String cleaned = pvl.trim()
+                                    .replace("▶ AI: ", "")
+                                    .replace("△ 对手: ", "");
+                            if (!cleaned.isEmpty()) pvMoves.add(cleaned);
                         }
+                        sb.append("▶ 预测后续：");
+                        for (int k = 0; k < pvMoves.size(); k++) {
+                            if (k > 0) sb.append(" → ");
+                            sb.append(pvMoves.get(k));
+                        }
+                        sb.append("\n");
                     }
                     if (stats.mateIn != 0) {
                         int steps = Math.abs(stats.mateIn);
@@ -310,6 +347,32 @@ public class ReviewPanel extends JPanel {
             }
         };
         worker.execute();
+    }
+
+    /** 历史对局第一步是否是红方走（历史记录始终红先） */
+    private boolean isFirstMoveRed() {
+        return true; // 历史对局始终红方先走
+    }
+
+    /** 根据 record.notations 重建棋谱表格（与 ChessPanel.updateNotation 逻辑一致） */
+    private void refreshNotationTable() {
+        notationModel.setRowCount(0);
+        if (record.notations.isEmpty()) return;
+        // 历史对局始终红方先走，无偏移
+        List<String> notaList = record.notations;
+        int size = notaList.size();
+        for (int i = 0; i < size; i += 4) {
+            int moveNo1 = i / 2 + 1;
+            String red1 = i     < size ? notaList.get(i)   : "";
+            String blk1 = i + 1 < size ? notaList.get(i+1) : "";
+            Object seq2 = "", red2 = "", blk2 = "";
+            if (i + 2 < size) {
+                seq2 = i / 2 + 2;
+                red2 = i + 2 < size ? notaList.get(i+2) : "";
+                blk2 = i + 3 < size ? notaList.get(i+3) : "";
+            }
+            notationModel.addRow(new Object[]{moveNo1, red1, blk1, seq2, red2, blk2});
+        }
     }
 
     private JButton makeNavBtn(String text, ActionListener al) {
@@ -333,11 +396,19 @@ public class ReviewPanel extends JPanel {
             board.move(mv[0], mv[1], mv[2], mv[3]);
         }
 
-        // 更新列表选中
+        // 更新表格选中行高亮（step=0时取消选中）
         final int finalStep = step;
         SwingUtilities.invokeLater(() -> {
-            moveList.setSelectedIndex(finalStep);
-            moveList.ensureIndexIsVisible(finalStep);
+            if (finalStep == 0) {
+                notationTable.clearSelection();
+                return;
+            }
+            int offset = isFirstMoveRed() ? 0 : 1;
+            int notaIdx = finalStep - 1;       // 0-based notations 索引
+            int paddedIdx = notaIdx + offset;  // padded 索引
+            int row = paddedIdx / 4;
+            notationTable.setRowSelectionInterval(row, row);
+            notationTable.scrollRectToVisible(notationTable.getCellRect(row, 0, true));
         });
 
         // 更新标签
