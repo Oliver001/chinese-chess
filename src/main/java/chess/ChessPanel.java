@@ -517,6 +517,12 @@ public class ChessPanel extends JPanel {
         historyItem.setMnemonic('H');
         historyItem.addActionListener(e -> ReviewPanel.showReviewDialog(this));
 
+        // 推演 & 局面分析
+        JMenuItem exploreItem = new JMenuItem("推演 & 分析(X)");
+        exploreItem.setMnemonic('X');
+        exploreItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK));
+        exploreItem.addActionListener(e -> openExploreDialog());
+
         JMenuItem editItem = new JMenuItem("摆谱/编辑棋局(E)");
         editItem.setMnemonic('E');
         editItem.addActionListener(e -> enterEditMode());
@@ -571,6 +577,7 @@ public class ChessPanel extends JPanel {
         gameMenu.add(pauseMenuItem);
         gameMenu.add(sep1);
         gameMenu.add(historyItem);
+        gameMenu.add(exploreItem);
         gameMenu.add(editItem);
         gameMenu.add(new JSeparator());
         gameMenu.add(saveGameItem);
@@ -1251,6 +1258,14 @@ public class ChessPanel extends JPanel {
                     gs.redTurn == gs.humanIsRed);
         }
         boardPanel.repaint();
+    }
+
+    // ===================== 推演 & 局面分析 =====================
+    private void openExploreDialog() {
+        // 传入当前棋盘快照（不影响主对局）
+        Piece[][] snapGrid = gs.board.copyGrid();
+        boolean snapRedTurn = gs.redTurn;
+        ExploreDialog.show(this, snapGrid, snapRedTurn);
     }
 
     // ===================== 编辑棋局 =====================
