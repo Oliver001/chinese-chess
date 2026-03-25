@@ -864,7 +864,7 @@ public class ChessPanel extends JPanel {
         // 保存当前是否暂停，进入编辑模式时自动暂停时钟
         boolean wasPaused = paused;
         paused = true;
-        new EditBoardDialog(this, gs.board, gs.redTurn, (newBoard, redTurn) -> {
+        new EditBoardDialog(this, gs.board, gs.redTurn, boardFlipped, (newBoard, redTurn) -> {
             // 将编辑结果应用到当前游戏
             for (int r = 0; r < 10; r++)
                 for (int c = 0; c < 9; c++)
