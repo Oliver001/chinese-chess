@@ -45,6 +45,12 @@ public class ReviewPanel extends JPanel {
     private ScoreChart scoreChart;
     private JButton prevBtn, nextBtn, firstBtn, lastBtn;
 
+    // ---- AI分析 ----
+    private final AIEngine reviewAI = new AIEngine();
+    private JTextArea analysisArea;   // 分析结果文本区
+    private JButton analyzeBtn;       // 分析当前步按钮
+    private boolean analyzing = false;
+
     public ReviewPanel(GameState.GameRecord record) {
         this.record = record;
         setLayout(new BorderLayout(4, 4));
@@ -164,7 +170,37 @@ public class ReviewPanel extends JPanel {
         nextBtn  = makeNavBtn("▶",  e -> gotoStep(Math.min(record.moves.size(), currentStep+1)));
         lastBtn  = makeNavBtn("▶|", e -> gotoStep(record.moves.size()));
         nav.add(firstBtn); nav.add(prevBtn); nav.add(nextBtn); nav.add(lastBtn);
-        bottom.add(nav, BorderLayout.SOUTH);
+
+        // AI分析按钮
+        analyzeBtn = new JButton("🤖 AI分析本步");
+        analyzeBtn.setFont(new Font("宋体", Font.BOLD, 11));
+        analyzeBtn.setForeground(new Color(0x006600));
+        analyzeBtn.addActionListener(e -> analyzeCurrentStep());
+
+        // AI分析结果区（可滚动）
+        analysisArea = new JTextArea(4, 1);
+        analysisArea.setFont(new Font("宋体", Font.PLAIN, 11));
+        analysisArea.setEditable(false);
+        analysisArea.setBackground(new Color(0xFFF8E1));
+        analysisArea.setForeground(new Color(0x3C3C00));
+        analysisArea.setLineWrap(false);
+        analysisArea.setText("点击「AI分析本步」获取建议走法");
+        JScrollPane analysisSp = new JScrollPane(analysisArea,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        analysisSp.setBorder(BorderFactory.createTitledBorder(
+            BorderFactory.createLineBorder(new Color(0xC8A060)), "AI分析建议",
+            TitledBorder.CENTER, TitledBorder.TOP,
+            new Font("宋体", Font.BOLD, 11), new Color(0x8B4513)));
+        analysisSp.setPreferredSize(new Dimension(SIDE_W, 110));
+
+        JPanel navBtnPanel = new JPanel(new BorderLayout(0, 3));
+        navBtnPanel.setOpaque(false);
+        navBtnPanel.add(nav,         BorderLayout.NORTH);
+        navBtnPanel.add(analyzeBtn,  BorderLayout.CENTER);
+        navBtnPanel.add(analysisSp,  BorderLayout.SOUTH);
+
+        bottom.add(navBtnPanel, BorderLayout.SOUTH);
 
         right.add(bottom, BorderLayout.SOUTH);
         add(right, BorderLayout.EAST);
@@ -182,6 +218,98 @@ public class ReviewPanel extends JPanel {
                 }
             }
         });
+    }
+
+    // =====================================================================
+    // AI 分析当前步建议走法
+    // =====================================================================
+    private void analyzeCurrentStep() {
+        if (analyzing) return;
+        analyzing = true;
+        analyzeBtn.setEnabled(false);
+        analyzeBtn.setText("🔍 分析中...");
+        analysisArea.setText("AI正在分析当前局面，请稍候...");
+
+        // 当前局面 board 已由 gotoStep 构建好，判断当前轮走方
+        boolean isRedTurn = (currentStep % 2 == 0); // 偶数步=红先，奇数步=黑先
+        // 若对局记录了humanIsRed，则第0步红先
+        // 简单按步数奇偶判断：初始红先
+        boolean redTurn = (currentStep % 2 == 0);
+
+        // 使用中等难度（约10秒）做快速分析
+        reviewAI.setTimeLimit(10_000);
+
+        // 复制当前board供后台线程使用（避免前台复盘操作干扰）
+        Board snapBoard = new Board();
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 9; c++)
+                snapBoard.grid[r][c] = board.grid[r][c] != null ? board.grid[r][c].copy() : null;
+
+        final boolean finalRedTurn = redTurn;
+        SwingWorker<String, Void> worker = new SwingWorker<String, Void>() {
+            int[] bestMove = null;
+            AIEngine.SearchStats stats = null;
+
+            @Override protected String doInBackground() {
+                // 注册统计回调收集PV
+                reviewAI.setStatsListener(s -> stats = s);
+                bestMove = reviewAI.getBestMove(snapBoard, finalRedTurn);
+                return null;
+            }
+
+            @Override protected void done() {
+                analyzing = false;
+                analyzeBtn.setEnabled(true);
+                analyzeBtn.setText("🤖 AI分析本步");
+
+                if (bestMove == null || bestMove[0] == -1) {
+                    analysisArea.setText("当前局面无合法走法（一方已被将死/困毙）");
+                    return;
+                }
+
+                StringBuilder sb = new StringBuilder();
+                String turnStr = finalRedTurn ? "红方" : "黑方";
+                sb.append("▶ 当前局面：").append(turnStr).append("走棋\n");
+
+                // 格式化最优走法
+                if (stats != null) {
+                    sb.append(String.format("▶ 最优着法 [深度%d]：", stats.depth));
+                    // 从棋盘获取棋子名称
+                    Piece p = snapBoard.grid[bestMove[0]][bestMove[1]];
+                    if (p != null) sb.append(p.getDisplay());
+                    sb.append(String.format("(%d,%d)→(%d,%d)\n", bestMove[0]+1,bestMove[1]+1,bestMove[2]+1,bestMove[3]+1));
+
+                    // 分数解读
+                    int sc = stats.boardScore;
+                    if (Math.abs(sc) > 5000) {
+                        sb.append(sc > 0 ? "▶ 局面：红方绝杀\n" : "▶ 局面：黑方绝杀\n");
+                    } else if (sc > 300) sb.append(String.format("▶ 局面评分：红方领先 %d 分\n", sc));
+                    else if (sc < -300) sb.append(String.format("▶ 局面评分：黑方领先 %d 分\n", -sc));
+                    else sb.append(String.format("▶ 局面评分：接近均势（%+d）\n", sc));
+
+                    // PV主线
+                    if (stats.pvLine != null && !stats.pvLine.isEmpty()) {
+                        sb.append("▶ 预测后续：\n");
+                        String[] pvSteps = stats.pvLine.split("\n");
+                        for (String step : pvSteps) {
+                            sb.append("   ").append(step
+                                    .replace("▶ AI: ", (finalRedTurn?"红 ":"黑 "))
+                                    .replace("△ 对手: ", (!finalRedTurn?"红 ":"黑 ")))
+                              .append("\n");
+                        }
+                    }
+                    if (stats.mateIn != 0) {
+                        int steps = Math.abs(stats.mateIn);
+                        boolean aiWins = stats.mateIn > 0;
+                        sb.append(String.format("▶ ⚡ %s步内绝杀！（%s方）\n",
+                                steps, aiWins == finalRedTurn ? turnStr : (finalRedTurn?"黑方":"红方")));
+                    }
+                }
+                analysisArea.setText(sb.toString().stripTrailing());
+                analysisArea.setCaretPosition(0);
+            }
+        };
+        worker.execute();
     }
 
     private JButton makeNavBtn(String text, ActionListener al) {

@@ -67,6 +67,10 @@ public class ChessPanel extends JPanel {
     // 记录上一次展示的局面分（用于人走棋后实时刷新绝杀提示）
     private volatile int lastBoardScore = 0;
 
+    // ---- 暂停 ----
+    private boolean paused = false;
+    private JButton pauseBtn;        // 暂停/继续按钮（成员变量方便更新文字）
+
     // ===================== 构造 =====================
     /** 无参构造（兼容旧代码，使用默认设置） */
     public ChessPanel() {
@@ -275,26 +279,23 @@ public class ChessPanel extends JPanel {
 
         side.add(topAll, BorderLayout.NORTH);
 
-        // ── 中部：棋谱 ──
-        JPanel centerPanel = new JPanel(new BorderLayout(0, 4));
-        centerPanel.setOpaque(false);
+        // ── 中部：棋谱（上）+ AI预测（下），用 JSplitPane 可拖分 ──
 
+        // 棋谱：支持水平+垂直滚动
         notationArea = new JTextArea();
         notationArea.setFont(new Font("宋体", Font.PLAIN, 12));
         notationArea.setEditable(false);
         notationArea.setBackground(new Color(0xFFFAF0));
-        JScrollPane scroll = new JScrollPane(notationArea);
+        notationArea.setLineWrap(false);  // 不折行，允许水平滚动
+        JScrollPane scroll = new JScrollPane(notationArea,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scroll.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(new Color(0xC8A060)), "棋谱",
                 TitledBorder.CENTER, TitledBorder.TOP,
                 new Font("宋体", Font.BOLD, 12), new Color(0x8B4513)));
-        centerPanel.add(scroll, BorderLayout.CENTER);
 
-        // ── 底部信息区：着法来源 + 绝杀提示 + PV走法 ──
-        JPanel pvPanel = new JPanel(new BorderLayout(0, 3));
-        pvPanel.setOpaque(false);
-
-        // 着法来源行
+        // ── 着法来源行 + 绝杀提示（放在PV面板顶部）──
         sourceLabel = new JLabel("<html><center>等待AI走棋...</center></html>", SwingConstants.CENTER);
         sourceLabel.setFont(new Font("宋体", Font.PLAIN, 11));
         sourceLabel.setForeground(new Color(0x555555));
@@ -303,9 +304,7 @@ public class ChessPanel extends JPanel {
         sourceLabel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(new Color(0xC8A060)),
             BorderFactory.createEmptyBorder(2, 4, 2, 4)));
-        pvPanel.add(sourceLabel, BorderLayout.NORTH);
 
-        // 绝杀提示行（放在 PV 上方，更醒目）
         mateLabel = new JLabel(" ", SwingConstants.CENTER);
         mateLabel.setFont(new Font("宋体", Font.BOLD, 13));
         mateLabel.setForeground(new Color(0xCC0000));
@@ -313,29 +312,40 @@ public class ChessPanel extends JPanel {
         mateLabel.setBackground(new Color(0xF5E6C8));
         mateLabel.setBorder(BorderFactory.createLineBorder(new Color(0xC8A060)));
 
-        // 最优着法（纯PV走法序列）
-        bestMoveArea = new JTextArea(5, 1);
+        // PV区：不折行，每行一条走法，支持水平+垂直滚动
+        bestMoveArea = new JTextArea();
         bestMoveArea.setFont(new Font("宋体", Font.PLAIN, 12));
         bestMoveArea.setEditable(false);
         bestMoveArea.setBackground(new Color(0xFFF8E1));
         bestMoveArea.setForeground(new Color(0x5C3317));
-        bestMoveArea.setLineWrap(true);
-        bestMoveArea.setWrapStyleWord(false);
+        bestMoveArea.setLineWrap(false);  // 不折行，支持水平滚动
         bestMoveArea.setText("AI尚未走棋");
-        JScrollPane pvScroll = new JScrollPane(bestMoveArea);
+        JScrollPane pvScroll = new JScrollPane(bestMoveArea,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         pvScroll.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(new Color(0xC8A060)), "AI预测走法",
                 TitledBorder.CENTER, TitledBorder.TOP,
                 new Font("宋体", Font.BOLD, 12), new Color(0x8B4513)));
 
-        JPanel matePvPanel = new JPanel(new BorderLayout(0, 2));
-        matePvPanel.setOpaque(false);
-        matePvPanel.add(mateLabel, BorderLayout.NORTH);
-        matePvPanel.add(pvScroll, BorderLayout.CENTER);
-        pvPanel.add(matePvPanel, BorderLayout.CENTER);
+        JPanel pvContainer = new JPanel(new BorderLayout(0, 2));
+        pvContainer.setOpaque(false);
+        JPanel pvTop = new JPanel(new BorderLayout(0, 2));
+        pvTop.setOpaque(false);
+        pvTop.add(sourceLabel, BorderLayout.NORTH);
+        pvTop.add(mateLabel,   BorderLayout.SOUTH);
+        pvContainer.add(pvTop,    BorderLayout.NORTH);
+        pvContainer.add(pvScroll, BorderLayout.CENTER);
 
-        centerPanel.add(pvPanel, BorderLayout.SOUTH);
-        side.add(centerPanel, BorderLayout.CENTER);
+        // 用 JSplitPane 分割棋谱(上)与AI预测(下)，棋谱占 40%，PV占 60%
+        JSplitPane splitCenter = new JSplitPane(JSplitPane.VERTICAL_SPLIT, scroll, pvContainer);
+        splitCenter.setResizeWeight(0.35);   // 棋谱初始占 35%
+        splitCenter.setDividerSize(5);
+        splitCenter.setContinuousLayout(true);
+        splitCenter.setOpaque(false);
+        splitCenter.setBorder(null);
+
+        side.add(splitCenter, BorderLayout.CENTER);
 
         // ── 底部：状态行 + 按钮 ──
         JPanel bottom = new JPanel(new BorderLayout(4, 4));
@@ -346,7 +356,7 @@ public class ChessPanel extends JPanel {
         statusLabel.setForeground(new Color(0xB22222));
         bottom.add(statusLabel, BorderLayout.NORTH);
 
-        JPanel btns = new JPanel(new GridLayout(4, 2, 4, 4));
+        JPanel btns = new JPanel(new GridLayout(5, 2, 4, 4));
         btns.setOpaque(false);
         addBtn(btns, "悔棋",     e -> doUndo());
         addBtn(btns, "新游戏",   e -> showNewGameDialog());
@@ -366,6 +376,16 @@ public class ChessPanel extends JPanel {
             sndBtn.setText(sound.isEnabled() ? "🔊 音效" : "🔇 静音");
         });
         btns.add(sndBtn);
+
+        // 暂停按钮
+        pauseBtn = new JButton("⏸ 暂停");
+        pauseBtn.setFont(new Font("宋体", Font.PLAIN, 11));
+        pauseBtn.addActionListener(e -> togglePause());
+        btns.add(pauseBtn);
+
+        // 摆棋按钮
+        addBtn(btns, "✏ 编辑棋局", e -> enterEditMode());
+
         bottom.add(btns, BorderLayout.CENTER);
         side.add(bottom, BorderLayout.SOUTH);
         return side;
@@ -381,7 +401,7 @@ public class ChessPanel extends JPanel {
     // ===================== 时钟 =====================
     private void startClock() {
         clockTimer = new Timer(1000, e -> {
-            if (!gs.gameOver) {
+            if (!gs.gameOver && !paused) {
                 // 修复：AI思考时仍对当前走方（AI方）计时，不跳过
                 if (!gs.tick()) {
                     gs.gameOver = true;
@@ -708,6 +728,61 @@ public class ChessPanel extends JPanel {
     }
 
 
+    // ===================== 暂停 =====================
+    private void togglePause() {
+        if (gs.gameOver) return;
+        paused = !paused;
+        pauseBtn.setText(paused ? "▶ 继续" : "⏸ 暂停");
+        if (paused) {
+            setStatus("⏸ 游戏已暂停", true);
+        } else {
+            setStatus((gs.redTurn == gs.humanIsRed ? "红方（你）" : "AI") + " 走棋",
+                    gs.redTurn == gs.humanIsRed);
+        }
+        boardPanel.repaint();
+    }
+
+    // ===================== 编辑棋局 =====================
+    private void enterEditMode() {
+        if (aiThinking) {
+            JOptionPane.showMessageDialog(this, "AI思考中，请等待...", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        // 保存当前是否暂停，进入编辑模式时自动暂停时钟
+        boolean wasPaused = paused;
+        paused = true;
+        new EditBoardDialog(this, gs.board, gs.redTurn, (newBoard, redTurn) -> {
+            // 将编辑结果应用到当前游戏
+            for (int r = 0; r < 10; r++)
+                for (int c = 0; c < 9; c++)
+                    gs.board.grid[r][c] = newBoard.grid[r][c];
+            gs.redTurn = redTurn;
+            gs.gameOver = false;
+            gs.history.clear();
+            gs.notations.clear();
+            selRow = -1; selCol = -1; legalMoves = null;
+            lastFR = -1; lastFC = -1; lastTR = -1; lastTC = -1;
+            renderSnapshot = null;
+            latestStats = null;
+            updateNotation();
+            bestMoveArea.setText("局面已更新");
+            sourceLabel.setText("等待走棋...");
+            mateLabel.setText(" ");
+            mateLabel.setBackground(new Color(0xF5E6C8));
+            updateAdvantage(Evaluator.evaluate(gs.board));
+            setStatus((redTurn == gs.humanIsRed ? "红方（你）" : "AI") + " 走棋",
+                    redTurn == gs.humanIsRed);
+            paused = wasPaused;
+            pauseBtn.setText(paused ? "▶ 继续" : "⏸ 暂停");
+            boardPanel.repaint();
+            // 若轮到AI走，触发AI
+            if (!paused && gs.redTurn != gs.humanIsRed) triggerAI();
+        }, () -> {
+            // 取消编辑：恢复暂停状态
+            paused = wasPaused;
+        }).setVisible(true);
+    }
+
     // ===================== FEN =====================
     private void saveFEN() {
         String fen = gs.board.toFEN(gs.redTurn);
@@ -786,7 +861,7 @@ public class ChessPanel extends JPanel {
         sourceLabel.setText(html);
     }
 
-    /** 更新"AI预测走法"文本区 —— 格式：每步单独一行，红用"红"黑用"黑"前缀 */
+    /** 更新"AI预测走法"文本区 —— 每行一条完整的预测后续序列 */
     private void updateBestMoveArea(AIEngine.SearchStats s) {
         if (s == null) { bestMoveArea.setText("AI尚未走棋"); return; }
         String pv = s.pvLine;
@@ -801,17 +876,19 @@ public class ChessPanel extends JPanel {
             return;
         }
         // pvLine 每行格式："▶ AI: 炮二平五" 或 "△ 对手: 马8进7"
-        // 转成用户要求格式：
-        //   红 炮二平五  黑 马8进7->
-        //   红 车一进一->黑 炮2退1->
-        //   ...（每两步拼一行，AI步用颜色前缀，用 "->" 隔开）
-        String[] lines = pv.split("\n");
-        StringBuilder sb = new StringBuilder();
-        // 判断AI是红还是黑
+        // 新格式：每行 = 一条从当前局面起的完整预测走法序列
+        //   例：第1深度  红 炮二平五 → 黑 马8进7 → 红 车一进一
+        //       第2深度  红 炮二平五 → 黑 马8进7
+        // 当前 pvLine 只有一条主线，把它整体展示在第1行，
+        // 同时把每步拆开注明方向，方便阅读。
+        String[] steps = pv.split("\n");
         boolean aiIsRed = s.aiIsRed;
 
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].trim();
+        // 构建主线（第depth层）：一行
+        StringBuilder mainLine = new StringBuilder();
+        mainLine.append(String.format("▶ 深度%-2d  ", s.depth));
+        for (int i = 0; i < steps.length; i++) {
+            String line = steps[i].trim();
             String notation;
             boolean isRed;
             if (line.startsWith("▶ AI: ")) {
@@ -822,18 +899,41 @@ public class ChessPanel extends JPanel {
                 isRed = !aiIsRed;
             } else {
                 notation = line;
-                isRed = (i % 2 == 0); // fallback
+                isRed = (i % 2 == 0) == aiIsRed;
             }
-            String prefix = isRed ? "红 " : "黑 ";
-            sb.append(prefix).append(notation);
-            // 每步之间用 "->" 连接，最后一步不加
-            if (i < lines.length - 1) {
-                sb.append("->");
-                // 每两步换行（红+黑算一轮）
-                if (i % 2 == 1) sb.append("\n");
-            }
+            if (i > 0) mainLine.append(" → ");
+            mainLine.append(isRed ? "红" : "黑").append(" ").append(notation);
         }
-        bestMoveArea.setText(sb.toString());
+
+        // 每个浅层子序列展示一行（去掉最后1步、2步...）
+        StringBuilder sb = new StringBuilder();
+        sb.append(mainLine).append("\n");
+        // 展示去掉末尾 1步、2步 的子序列（提供对比参考）
+        for (int cut = 1; cut < Math.min(steps.length, 4); cut++) {
+            int showLen = steps.length - cut;
+            if (showLen < 1) break;
+            sb.append(String.format("  └ 前%-2d步  ", showLen));
+            for (int i = 0; i < showLen; i++) {
+                String line = steps[i].trim();
+                String notation;
+                boolean isRed;
+                if (line.startsWith("▶ AI: ")) {
+                    notation = line.substring(6);
+                    isRed = aiIsRed;
+                } else if (line.startsWith("△ 对手: ")) {
+                    notation = line.substring(6);
+                    isRed = !aiIsRed;
+                } else {
+                    notation = line;
+                    isRed = (i % 2 == 0) == aiIsRed;
+                }
+                if (i > 0) sb.append(" → ");
+                sb.append(isRed ? "红" : "黑").append(" ").append(notation);
+            }
+            sb.append("\n");
+        }
+
+        bestMoveArea.setText(sb.toString().stripTrailing());
         bestMoveArea.setCaretPosition(0);
     }
 
