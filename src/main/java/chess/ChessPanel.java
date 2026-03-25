@@ -15,7 +15,7 @@ public class ChessPanel extends JPanel {
     private static final int PIECE_R = 26;
     private static final int BOARD_W = MARGIN * 2 + CELL * 8;
     private static final int BOARD_H = MARGIN * 2 + CELL * 9;
-    private static final int SIDE_W  = 188;
+    private static final int SIDE_W  = 370;
 
     // ---- 动态尺寸（随面板大小实时计算，供绘制和点击使用）----
     private volatile int dynCell   = CELL;
@@ -168,19 +168,6 @@ public class ChessPanel extends JPanel {
         sidePanel = createSidePanel();
         add(sidePanel, BorderLayout.EAST);
 
-        addComponentListener(new ComponentAdapter() {
-            @Override public void componentResized(ComponentEvent e) {
-                int totalW = getWidth();
-                if (totalW <= 0) return;
-                int newSideW = Math.max(370, (int)(totalW * 0.30));
-                Dimension cur = sidePanel.getPreferredSize();
-                if (cur.width != newSideW) {
-                    sidePanel.setPreferredSize(new Dimension(newSideW, cur.height));
-                    revalidate();
-                }
-            }
-        });
-
         // 清空棋盘，显示欢迎状态
         for (int r = 0; r < 10; r++)
             for (int c = 0; c < 9; c++)
@@ -230,20 +217,6 @@ public class ChessPanel extends JPanel {
         add(boardPanel, BorderLayout.CENTER);
         sidePanel = createSidePanel();
         add(sidePanel, BorderLayout.EAST);
-
-        // 监听整体面板尺寸变化，动态调整右侧栏宽度（约占总宽 30%，最小 370px，适配6列棋谱）
-        addComponentListener(new ComponentAdapter() {
-            @Override public void componentResized(ComponentEvent e) {
-                int totalW = getWidth();
-                if (totalW <= 0) return;
-                int newSideW = Math.max(370, (int)(totalW * 0.30));
-                Dimension cur = sidePanel.getPreferredSize();
-                if (cur.width != newSideW) {
-                    sidePanel.setPreferredSize(new Dimension(newSideW, cur.height));
-                    revalidate();
-                }
-            }
-        });
 
         // 更新侧边栏标签
         if (gs.humanIsRed) {
@@ -362,7 +335,7 @@ public class ChessPanel extends JPanel {
     private JPanel createSidePanel() {
         JPanel side = new JPanel(new BorderLayout(4, 4));
         side.setPreferredSize(new Dimension(SIDE_W, BOARD_H));
-        side.setMinimumSize(new Dimension(188, 500));
+        side.setMinimumSize(new Dimension(370, 500));
         side.setBackground(new Color(0xF5E6C8));
         side.setBorder(new EmptyBorder(8, 6, 8, 8));
 

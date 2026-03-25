@@ -20,7 +20,7 @@ public class Main {
             frame.setJMenuBar(panel.createMenuBar());
             frame.add(panel);
             frame.pack();
-            frame.setMinimumSize(new Dimension(700, 600));
+            frame.setMinimumSize(new Dimension(1000, 720));
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);
         });
