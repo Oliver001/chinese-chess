@@ -524,27 +524,36 @@ public class ExploreDialog extends JDialog {
                     String deltaStr = scoreDelta > 0 ? "▲+" + scoreDelta
                                    : (scoreDelta < 0 ? "▼" + scoreDelta : "—");
 
+                    // 候选走法标题行
                     sb.append(String.format("%d. %s  %s  %s  【%s】\n",
                             i + 1, moveStr, scoreDesc(cr.score), deltaStr,
                             sourceTag(cr.oppSource)));
 
-                    if (cr.pvLine != null && !cr.pvLine.isEmpty() && !cr.pvLine.startsWith("⚡")) {
-                        String[] pvLines = cr.pvLine.split("\n");
-                        StringBuilder pvRow = new StringBuilder("   └ 后续: ");
-                        boolean first = true;
-                        for (String pvl : pvLines) {
-                            String cleaned = pvl.trim()
-                                    .replace("▶ AI: ", "")
-                                    .replace("△ 对手: ", "");
-                            if (!cleaned.isEmpty()) {
-                                if (!first) pvRow.append(" → ");
-                                pvRow.append(cleaned);
-                                first = false;
+                    // 后续 PV 主线：格式 "   └ 候选走法 → 对手应对 → AI后续 → ..."
+                    if (cr.pvLine != null && cr.pvLine.startsWith("⚡")) {
+                        // 绝杀：直接显示
+                        sb.append("   └ ").append(cr.pvLine).append("\n");
+                    } else {
+                        // 从 pvLine 提取中文走法列表（去掉 "▶ AI: " / "△ 对手: " 前缀）
+                        // pvLine 每行格式：  "▶ AI: 炮二平五"  或  "△ 对手: 马8进7"
+                        List<String> pvMoves = new ArrayList<>();
+                        pvMoves.add(moveStr);  // 第一步：候选走法本身
+                        if (cr.pvLine != null && !cr.pvLine.isEmpty()) {
+                            for (String pvl : cr.pvLine.split("\n")) {
+                                String cleaned = pvl.trim()
+                                        .replace("▶ AI: ", "")
+                                        .replace("△ 对手: ", "");
+                                if (!cleaned.isEmpty()) pvMoves.add(cleaned);
                             }
                         }
-                        sb.append(pvRow).append("\n");
-                    } else if (cr.pvLine != null && cr.pvLine.startsWith("⚡")) {
-                        sb.append("   └ ").append(cr.pvLine).append("\n");
+                        if (pvMoves.size() > 1) {
+                            sb.append("   └ ");
+                            for (int k = 0; k < pvMoves.size(); k++) {
+                                if (k > 0) sb.append(" → ");
+                                sb.append(pvMoves.get(k));
+                            }
+                            sb.append("\n");
+                        }
                     }
 
                     if (i < Math.min(MULTI_PV, sorted.size()) - 1)
@@ -798,48 +807,33 @@ public class ExploreDialog extends JDialog {
     }
 
     private void updateNotationArea() {
-        // 从步骤栈重建棋谱列表（时序顺序）
+        // 从步骤栈重建有序走法列表（时序从先到后）
         List<StepRecord> recs = new ArrayList<>(stepStack);
-        Collections.reverse(recs);
+        Collections.reverse(recs);   // stepStack 是栈，head=最新，reverse 后 index0=第一步
         notationModel.setRowCount(0);
         if (recs.isEmpty()) return;
 
-        // 构建走法字符串列表（按先走方顺序排列）
-        // 注意：棋谱从initRedTurn方开始，每步交替
+        // 构建中文走法列表（每步一条，与 ChessPanel.gs.notations 结构完全相同）
+        // 若首步是黑方走，在列表头部插入一个空占位，使红方列始终对应偶数索引(0,2,4...)
         List<String> notaList = new ArrayList<>();
+        if (!recs.get(0).wasRed) notaList.add("");   // 黑方先走：红方列留空
         for (StepRecord rec : recs) {
             notaList.add(GameState.buildNotationStatic(
                     rec.fr, rec.fc, rec.tr, rec.tc, rec.snapshot, rec.wasRed));
         }
 
-        // 判断棋谱起始方：第一步的走棋方
-        // 如果第一步是黑方走，则序号从"黑"列开始填入
-        // 这里沿用ChessPanel逻辑：每行存4个走法（两手），格式 [seq1,红1,黑1,seq2,红2,黑2]
-        // 推演时可能从黑方开局，需处理奇偶位置
-        boolean firstIsRed = !recs.isEmpty() && recs.get(0).wasRed;
-
-        // 若非从红方开始，先补一个空位，使红方始终在第一个走法列
-        // 规则：红方对应 notaList 奇数位（0-indexed），黑方对应偶数位 —— 若首步是黑方则反之
-        // 简化处理：严格按"每回合红→黑"排列，非红开局时第一格留空
-        int offset = firstIsRed ? 0 : 1; // 黑先走则在偶数位（补一个空格）
-
-        // 构建含偏移的列表
-        List<String> padded = new ArrayList<>();
-        for (int i = 0; i < offset; i++) padded.add("");
-        padded.addAll(notaList);
-
-        // 按4个一行填入表格（每行两手棋）
-        int totalMoveSlots = padded.size();
-        int roundBase = firstIsRed ? 1 : 1; // 回合从1开始
-        for (int i = 0; i < totalMoveSlots; i += 4) {
-            int moveNo1 = i / 2 + roundBase;
-            String red1 = i     < totalMoveSlots ? padded.get(i)   : "";
-            String blk1 = i + 1 < totalMoveSlots ? padded.get(i+1) : "";
+        // 填表：与 ChessPanel.updateNotation() 逻辑完全一致
+        // 每行4格：[序1, 红1, 黑1, 序2, 红2, 黑2]（两回合，每回合一红一黑）
+        int size = notaList.size();
+        for (int i = 0; i < size; i += 4) {
+            int moveNo1 = i / 2 + 1;
+            String red1 = i     < size ? notaList.get(i)   : "";
+            String blk1 = i + 1 < size ? notaList.get(i+1) : "";
             Object seq2 = "", red2 = "", blk2 = "";
-            if (i + 2 < totalMoveSlots) {
-                seq2 = i / 2 + roundBase + 1;
-                red2 = i + 2 < totalMoveSlots ? padded.get(i+2) : "";
-                blk2 = i + 3 < totalMoveSlots ? padded.get(i+3) : "";
+            if (i + 2 < size) {
+                seq2 = i / 2 + 2;
+                red2 = i + 2 < size ? notaList.get(i+2) : "";
+                blk2 = i + 3 < size ? notaList.get(i+3) : "";
             }
             notationModel.addRow(new Object[]{moveNo1, red1, blk1, seq2, red2, blk2});
         }
