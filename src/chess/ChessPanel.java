@@ -114,6 +114,8 @@ public class ChessPanel extends JPanel {
         ExternalEngine.Protocol proto = finalType == EngineSelectDialog.EngineType.EXTERNAL_UCCI
                 ? ExternalEngine.Protocol.UCCI : ExternalEngine.Protocol.UCI;
         ExternalEngine eng = new ExternalEngine(finalPath, proto);
+        // 预载上次保存的UCI参数（在start()握手后、isready前自动发送）
+        applyStoredEngineOptions(eng);
         if (engineMenuItem != null)
             engineMenuItem.setText("AI引擎: 连接中...(E)");
         new Thread(() -> {
@@ -136,6 +138,20 @@ public class ChessPanel extends JPanel {
                 }
             });
         }, "engine-autoconnect").start();
+    }
+
+    /** 将Preferences中保存的UCI参数预载到引擎对象（start()握手时自动发送） */
+    private void applyStoredEngineOptions(ExternalEngine eng) {
+        String[] keys = {"Threads", "Hash", "MultiPV", "Move Overhead", "UCI_ShowWDL"};
+        String[] prefKeys = {"opt.Threads", "opt.Hash", "opt.MultiPV", "opt.Move Overhead", "opt.UCI_ShowWDL"};
+        String[] defaults = {"1", "16", "1", "10", "false"};
+        for (int i = 0; i < keys.length; i++) {
+            String val = PREFS.get(prefKeys[i], defaults[i]);
+            // 只有与默认值不同时才设置，避免不必要的setoption
+            if (!val.equals(defaults[i])) {
+                eng.setOption(keys[i], val);
+            }
+        }
     }
 
     // ===================== 构造 =====================
@@ -510,15 +526,33 @@ public class ChessPanel extends JPanel {
 
         JSeparator sep1 = new JSeparator();
 
-        JMenuItem saveFenItem = new JMenuItem("保存局面(S)");
+        JMenuItem saveFenItem = new JMenuItem("保存局面FEN(S)");
         saveFenItem.setMnemonic('S');
         saveFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK));
         saveFenItem.addActionListener(e -> saveFEN());
 
-        JMenuItem loadFenItem = new JMenuItem("读取局面(O)");
+        JMenuItem loadFenItem = new JMenuItem("读取局面FEN(O)");
         loadFenItem.setMnemonic('O');
         loadFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
         loadFenItem.addActionListener(e -> loadFEN());
+
+        // 保存/加载对局（继续对局）
+        JMenuItem saveGameItem = new JMenuItem("保存棋局(Ctrl+W)");
+        saveGameItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_W, InputEvent.CTRL_DOWN_MASK));
+        saveGameItem.addActionListener(e -> {
+            if (gs.gameOver) {
+                setStatus("对局已结束，无需手动保存", true);
+                return;
+            }
+            gs.saveGame("进行中");
+            setStatus("棋局已保存，下次可继续", true);
+            JOptionPane.showMessageDialog(this, "棋局已保存！\n下次启动可通过[加载棋局]菜单继续对弈。",
+                    "保存成功", JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        JMenuItem loadGameItem = new JMenuItem("加载棋局(Ctrl+L)");
+        loadGameItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.CTRL_DOWN_MASK));
+        loadGameItem.addActionListener(e -> showLoadGameDialog());
 
         JMenuItem exitItem = new JMenuItem("退出(Q)");
         exitItem.setMnemonic('Q');
@@ -538,6 +572,9 @@ public class ChessPanel extends JPanel {
         gameMenu.add(historyItem);
         gameMenu.add(editItem);
         gameMenu.add(new JSeparator());
+        gameMenu.add(saveGameItem);
+        gameMenu.add(loadGameItem);
+        gameMenu.add(new JSeparator());
         gameMenu.add(saveFenItem);
         gameMenu.add(loadFenItem);
         gameMenu.add(new JSeparator());
@@ -556,12 +593,17 @@ public class ChessPanel extends JPanel {
         engineMenuItem.setMnemonic('E');
         engineMenuItem.addActionListener(e -> showEngineSelectDialog());
 
+        // 皮卡鱼/外部引擎参数设置
+        JMenuItem engineOptionsItem = new JMenuItem("引擎参数设置(O)");
+        engineOptionsItem.addActionListener(e -> showEngineOptionsDialog());
+
         // 音效开关（CheckBox菜单项）
         JCheckBoxMenuItem soundItem = new JCheckBoxMenuItem("音效(M)", sound.isEnabled());
         soundItem.setMnemonic('M');
         soundItem.addActionListener(e -> sound.setEnabled(soundItem.isSelected()));
 
         settingsMenu.add(engineMenuItem);
+        settingsMenu.add(engineOptionsItem);
         settingsMenu.add(diffItem);
         settingsMenu.add(soundItem);
 
@@ -751,20 +793,105 @@ public class ChessPanel extends JPanel {
                     boardPanel.repaint();
                 }),
                 info -> {
-                    // 解析 info 行中的 score cp
-                    if (info.contains("score cp")) {
+                    // 解析皮卡鱼 info 行：score cp / score mate / depth / pv
+                    // 格式：info depth N seldepth M score cp X nodes N nps N pv a0b1 ...
+                    //   或：info depth N ... score mate M pv ...
+                    final String fi = info;
+                    if (info.contains("score cp") || info.contains("score mate") || info.contains("depth")) {
                         try {
-                            int idx = info.indexOf("score cp") + 9;
-                            String[] parts = info.substring(idx).trim().split("\\s+");
-                            int cp = Integer.parseInt(parts[0]);
-                            // UCI中cp是走棋方视角（正=当前方优），转换为红方视角
-                            int boardScore = redTurnSnap ? cp : -cp;
-                            SwingUtilities.invokeLater(() -> updateAdvantage(boardScore));
-                        } catch (Exception ignored) {}
+                            String[] tokens = info.split("\\s+");
+                            int depth = 0;
+                            int cp = Integer.MIN_VALUE;
+                            int mateIn = 0;
+                            int pvStart = -1;
+
+                            for (int i = 0; i < tokens.length; i++) {
+                                switch (tokens[i]) {
+                                    case "depth": if (i+1<tokens.length) depth = Integer.parseInt(tokens[i+1]); break;
+                                    case "cp":    if (i+1<tokens.length) cp    = Integer.parseInt(tokens[i+1]); break;
+                                    case "mate":  if (i+1<tokens.length) mateIn= Integer.parseInt(tokens[i+1]); break;
+                                    case "pv":    pvStart = i+1; break;
+                                }
+                            }
+
+                            final int fDepth  = depth;
+                            final int fCp     = cp;
+                            final int fMateIn = mateIn;
+                            final int fPvStart = pvStart;
+                            final boolean aiIsRed = redTurnSnap;
+
+                            SwingUtilities.invokeLater(() -> {
+                                // 更新评分条
+                                if (fCp != Integer.MIN_VALUE) {
+                                    int boardScore = aiIsRed ? fCp : -fCp;
+                                    updateAdvantage(boardScore);
+                                } else if (fMateIn != 0) {
+                                    // score mate M: 正值=当前方赢，负值=当前方输
+                                    int abs = Math.abs(fMateIn);
+                                    if (fMateIn > 0) updateAdvantage(aiIsRed ? 99999 : -99999);
+                                    else             updateAdvantage(aiIsRed ? -99999 : 99999);
+                                }
+
+                                // 更新绝杀提示
+                                if (fMateIn != 0) {
+                                    String attacker, defender;
+                                    if (fMateIn > 0) {
+                                        // 当前走棋方能绝杀
+                                        attacker = aiIsRed ? "红" : "黑";
+                                        defender = aiIsRed ? "黑" : "红";
+                                        mateLabel.setText("⚑ " + attacker + "方 " + Math.abs(fMateIn) + " 步绝杀" + defender + "方！");
+                                        mateLabel.setForeground(Color.WHITE);
+                                        mateLabel.setBackground(new Color(0xCC2222));
+                                    } else {
+                                        // 对方能绝杀当前走棋方
+                                        attacker = aiIsRed ? "黑" : "红";
+                                        defender = aiIsRed ? "红" : "黑";
+                                        mateLabel.setText("⚠ " + attacker + "方 " + Math.abs(fMateIn) + " 步绝杀" + defender + "方！");
+                                        mateLabel.setForeground(Color.WHITE);
+                                        mateLabel.setBackground(new Color(0x226622));
+                                    }
+                                } else {
+                                    mateLabel.setText(" ");
+                                    mateLabel.setBackground(new Color(0xF5E6C8));
+                                }
+
+                                // 更新AI预测走法区：把皮卡鱼PV转成中文棋谱
+                                if (fPvStart >= 0 && fPvStart < fi.split("\\s+").length) {
+                                    String[] tk = fi.split("\\s+");
+                                    StringBuilder pvSb = new StringBuilder();
+                                    pvSb.append(String.format("▶ 深度%-2d  ", fDepth));
+                                    // 在当前局面基础上逐步演示PV走法
+                                    Board sim = new Board();
+                                    for (int r2=0;r2<10;r2++)
+                                        for (int c2=0;c2<9;c2++)
+                                            sim.grid[r2][c2] = boardSnapshot.grid[r2][c2] != null
+                                                ? boardSnapshot.grid[r2][c2].copy() : null;
+                                    boolean turn = aiIsRed;
+                                    for (int i = fPvStart; i < tk.length && i < fPvStart+10; i++) {
+                                        int[] mv2 = ExternalEngine.iccsToInternal(tk[i]);
+                                        if (mv2 == null) break;
+                                        Piece[][] snap = sim.copyGrid();
+                                        String nota = GameState.buildNotationStatic(mv2[0],mv2[1],mv2[2],mv2[3],snap,turn);
+                                        if (i > fPvStart) pvSb.append(" → ");
+                                        pvSb.append(nota);
+                                        try { sim.move(mv2[0],mv2[1],mv2[2],mv2[3]); } catch(Exception ignored2){}
+                                        turn = !turn;
+                                    }
+                                    if (fMateIn != 0) pvSb.append("  ✦绝杀");
+                                    sourceLabel.setText("<html><center>🔌 " + externalEngine.getName()
+                                        + "  depth=" + fDepth + "</center></html>");
+                                    bestMoveArea.setText(pvSb.toString());
+                                    bestMoveArea.setCaretPosition(0);
+                                } else {
+                                    sourceLabel.setText("<html><center>" + fi.replace("<","&lt;") + "</center></html>");
+                                }
+                            });
+                        } catch (Exception ignored) {
+                            String finalInfo = fi;
+                            SwingUtilities.invokeLater(() -> sourceLabel.setText(
+                                "<html><center>" + finalInfo.replace("<","&lt;") + "</center></html>"));
+                        }
                     }
-                    String finalInfo = info;
-                    SwingUtilities.invokeLater(() -> sourceLabel.setText(
-                        "<html><center>" + finalInfo.replace("<","&lt;") + "</center></html>"));
                 });
             return; // 外部引擎路径到此结束，剩余代码走内置AI
         }
@@ -1061,6 +1188,7 @@ public class ChessPanel extends JPanel {
             ExternalEngine.Protocol proto = newType == EngineSelectDialog.EngineType.EXTERNAL_UCCI
                     ? ExternalEngine.Protocol.UCCI : ExternalEngine.Protocol.UCI;
             ExternalEngine eng = new ExternalEngine(newPath, proto);
+            applyStoredEngineOptions(eng);  // 预载UCI参数
             setStatus("正在连接引擎...", false);
             new Thread(() -> {
                 boolean ok = false;
@@ -1127,7 +1255,176 @@ public class ChessPanel extends JPanel {
         boardPanel.repaint();
     }
 
-    // ===================== 难度 =====================
+    // ===================== 加载棋局（继续对弈） =====================
+    private void showLoadGameDialog() {
+        java.util.List<GameState.GameRecord> games = GameState.loadAllGames();
+        if (games.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "没有找到已保存的棋局。\n请先通过[保存棋局]菜单保存进行中的对局。",
+                    "加载棋局", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 只显示"进行中"的棋局
+        java.util.List<GameState.GameRecord> inProgress = new java.util.ArrayList<>();
+        for (GameState.GameRecord r : games)
+            if (r.inProgress) inProgress.add(r);
+        if (inProgress.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "没有找到进行中的棋局。\n所有已保存的棋局已结束。",
+                    "加载棋局", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        GameState.GameRecord[] arr = inProgress.toArray(new GameState.GameRecord[0]);
+        GameState.GameRecord sel = (GameState.GameRecord) JOptionPane.showInputDialog(
+                this,
+                "选择要继续的棋局：\n（日期  执棋方  状态）",
+                "加载棋局",
+                JOptionPane.QUESTION_MESSAGE,
+                null, arr, arr[0]);
+        if (sel == null) return;
+
+        // 停止当前AI
+        if (aiThinking) {
+            if (externalEngine != null) externalEngine.stopSearch();
+            // 内置AI没有强制停止接口，标记停止标志让搜索自然超时
+            aiThinking = false;
+        }
+        if (animTimer != null) animTimer.stop();
+
+        // 从FEN恢复局面
+        if (sel.currentFen != null && !sel.currentFen.isEmpty()) {
+            boolean rt = gs.board.fromFEN(sel.currentFen);
+            // fromFEN返回的是走棋方(true=红)，但FEN自带 w/b 信息
+            gs.redTurn = sel.redTurn;
+        }
+        gs.humanIsRed = sel.humanIsRed;
+        gs.gameOver = false;
+
+        // 恢复时制
+        if (sel.redTimeLeft >= 0)   gs.redTimeLeft   = sel.redTimeLeft;
+        if (sel.blackTimeLeft >= 0) gs.blackTimeLeft = sel.blackTimeLeft;
+
+        // 恢复棋谱
+        gs.history.clear();
+        gs.notations.clear();
+        gs.notations.addAll(sel.notations);
+
+        // 难度
+        try { gs.difficulty = GameState.Difficulty.valueOf(sel.difficultyName); }
+        catch (Exception e) { gs.difficulty = GameState.Difficulty.MEDIUM; }
+
+        // 恢复侧边标签
+        if (gs.humanIsRed) {
+            redSideLabel.setText("红方（你）");
+            blackSideLabel.setText("黑方（AI）");
+        } else {
+            redSideLabel.setText("红方（AI）");
+            blackSideLabel.setText("黑方（你）");
+        }
+        boardFlipped = !gs.humanIsRed;
+        refreshTimePanelOrder();
+
+        selRow=-1; selCol=-1; legalMoves=null;
+        lastFR=-1; lastFC=-1; lastTR=-1; lastTC=-1;
+        renderSnapshot=null;
+        latestStats=null;
+        bestMoveArea.setText("AI尚未走棋");
+        sourceLabel.setText("等待走棋...");
+        mateLabel.setText(" ");
+        mateLabel.setBackground(new Color(0xF5E6C8));
+
+        updateNotation();
+        updateTimeLabels();
+        updateAdvantage(Evaluator.evaluate(gs.board));
+        String side = gs.humanIsRed ? "红方" : "黑方";
+        setStatus("棋局已恢复，你执" + side + "，继续对弈", gs.humanIsRed);
+        boardPanel.repaint();
+
+        // 若轮到AI走棋，触发AI
+        if (gs.redTurn != gs.humanIsRed) {
+            SwingUtilities.invokeLater(this::triggerAI);
+        }
+    }
+
+    // ===================== 引擎参数设置 =====================
+    /**
+     * 皮卡鱼/外部引擎参数设置对话框。
+     * 支持 Threads/Hash/MultiPV/Move Overhead/UCI_ShowWDL 等常用UCI选项，并持久化到Preferences。
+     */
+    private void showEngineOptionsDialog() {
+        // 只有外部引擎才能设置参数
+        boolean isExternal = (externalEngine != null);
+
+        JPanel p = new JPanel(new GridLayout(0, 2, 8, 6));
+        p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        // 线程数
+        JLabel lblThreads = new JLabel("线程数 (Threads)：");
+        JSpinner spThreads = new JSpinner(new SpinnerNumberModel(
+                Integer.parseInt(PREFS.get("opt.Threads", "1")), 1, Runtime.getRuntime().availableProcessors() * 2, 1));
+        p.add(lblThreads); p.add(spThreads);
+
+        // Hash大小（MB）
+        JLabel lblHash = new JLabel("Hash大小 (MB)：");
+        JSpinner spHash = new JSpinner(new SpinnerNumberModel(
+                Integer.parseInt(PREFS.get("opt.Hash", "16")), 1, 4096, 16));
+        p.add(lblHash); p.add(spHash);
+
+        // MultiPV
+        JLabel lblMultiPV = new JLabel("MultiPV（多条主线）：");
+        JSpinner spMultiPV = new JSpinner(new SpinnerNumberModel(
+                Integer.parseInt(PREFS.get("opt.MultiPV", "1")), 1, 8, 1));
+        p.add(lblMultiPV); p.add(spMultiPV);
+
+        // Move Overhead
+        JLabel lblOverhead = new JLabel("移动延迟 (Move Overhead ms)：");
+        JSpinner spOverhead = new JSpinner(new SpinnerNumberModel(
+                Integer.parseInt(PREFS.get("opt.Move Overhead", "10")), 0, 500, 10));
+        p.add(lblOverhead); p.add(spOverhead);
+
+        // UCI_ShowWDL
+        JLabel lblWDL = new JLabel("显示胜率WDL (UCI_ShowWDL)：");
+        JCheckBox cbWDL = new JCheckBox("", Boolean.parseBoolean(PREFS.get("opt.UCI_ShowWDL", "false")));
+        p.add(lblWDL); p.add(cbWDL);
+
+        // 提示
+        JLabel hint = new JLabel("<html><font color='#666666' size='2'>" +
+                (isExternal ? "✅ 已连接外部引擎，参数设置后立即生效。" : "⚠ 当前使用内置AI，参数将在下次连接外部引擎时生效。")
+                + "</font></html>");
+
+        Object[] msg = {
+            "<html><b>皮卡鱼/外部引擎参数设置</b><br><font size='2' color='#888888'>修改后点确认立即发送给引擎（建议重新开局生效）</font></html>",
+            p, hint
+        };
+
+        int res = JOptionPane.showConfirmDialog(this, msg, "引擎参数设置",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (res != JOptionPane.OK_OPTION) return;
+
+        // 保存并应用
+        String threads   = String.valueOf(spThreads.getValue());
+        String hash      = String.valueOf(spHash.getValue());
+        String multiPV   = String.valueOf(spMultiPV.getValue());
+        String overhead  = String.valueOf(spOverhead.getValue());
+        String showWDL   = cbWDL.isSelected() ? "true" : "false";
+
+        PREFS.put("opt.Threads",        threads);
+        PREFS.put("opt.Hash",           hash);
+        PREFS.put("opt.MultiPV",        multiPV);
+        PREFS.put("opt.Move Overhead",  overhead);
+        PREFS.put("opt.UCI_ShowWDL",    showWDL);
+
+        if (isExternal) {
+            externalEngine.sendOption("Threads",       threads);
+            externalEngine.sendOption("Hash",          hash);
+            externalEngine.sendOption("MultiPV",       multiPV);
+            externalEngine.sendOption("Move Overhead", overhead);
+            externalEngine.sendOption("UCI_ShowWDL",   showWDL);
+            setStatus("引擎参数已更新：" + threads + "线程，Hash=" + hash + "MB", true);
+        } else {
+            setStatus("参数已保存，下次连接外部引擎时生效", true);
+        }
+    }
     private void showDifficultyDialog() {
         String[] opts = {"简单（10秒/步）", "中等（30秒/步）", "困难（2分钟/步）"};
         int cur = gs.difficulty == GameState.Difficulty.EASY ? 0
@@ -1192,33 +1489,24 @@ public class ChessPanel extends JPanel {
             return;
         }
         // pvLine 每行格式："▶ AI: 炮二平五" 或 "△ 对手: 马8进7"
-        // 新格式：每行 = 一条从当前局面起的完整预测走法序列
-        //   例：第1深度  红 炮二平五 → 黑 马8进7 → 红 车一进一
-        //       第2深度  红 炮二平五 → 黑 马8进7
-        // 当前 pvLine 只有一条主线，把它整体展示在第1行，
-        // 同时把每步拆开注明方向，方便阅读。
+        // 显示格式：深度N  炮二平五 → 马8进7 → 车一进一（去掉红/黑前缀，因规则已知奇红偶黑）
         String[] steps = pv.split("\n");
-        boolean aiIsRed = s.aiIsRed;
 
-        // 构建主线（第depth层）：一行
+        // 主线（第depth层）：一行
         StringBuilder mainLine = new StringBuilder();
         mainLine.append(String.format("▶ 深度%-2d  ", s.depth));
         for (int i = 0; i < steps.length; i++) {
             String line = steps[i].trim();
             String notation;
-            boolean isRed;
             if (line.startsWith("▶ AI: ")) {
                 notation = line.substring(6);
-                isRed = aiIsRed;
             } else if (line.startsWith("△ 对手: ")) {
                 notation = line.substring(6);
-                isRed = !aiIsRed;
             } else {
                 notation = line;
-                isRed = (i % 2 == 0) == aiIsRed;
             }
             if (i > 0) mainLine.append(" → ");
-            mainLine.append(isRed ? "红" : "黑").append(" ").append(notation);
+            mainLine.append(notation);
         }
 
         // 每个浅层子序列展示一行（去掉最后1步、2步...）
@@ -1232,19 +1520,15 @@ public class ChessPanel extends JPanel {
             for (int i = 0; i < showLen; i++) {
                 String line = steps[i].trim();
                 String notation;
-                boolean isRed;
                 if (line.startsWith("▶ AI: ")) {
                     notation = line.substring(6);
-                    isRed = aiIsRed;
                 } else if (line.startsWith("△ 对手: ")) {
                     notation = line.substring(6);
-                    isRed = !aiIsRed;
                 } else {
                     notation = line;
-                    isRed = (i % 2 == 0) == aiIsRed;
                 }
                 if (i > 0) sb.append(" → ");
-                sb.append(isRed ? "红" : "黑").append(" ").append(notation);
+                sb.append(notation);
             }
             sb.append("\n");
         }

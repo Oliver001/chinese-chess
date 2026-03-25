@@ -1,16 +1,18 @@
 package chess;
 
 import java.io.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
  * 外部象棋引擎适配器。
  * 通过子进程通信支持 UCI（皮卡鱼等）和 UCCI（象棋巫师等）协议引擎。
  *
- * UCI-Cyclone坐标 ↔ 内部坐标（完全相同，无需翻转）：
- *   行：0=黑方底线（棋盘顶部），9=红方底线（棋盘底部）—— 与内部坐标一致
- *   列：a-i 对应内部列 0-8 —— 与内部坐标一致
- *   示例：c3c4 → fromRow=3,fromCol=2, toRow=4,toCol=2
+ * 坐标系（皮卡鱼 UCI-Cyclone）：
+ *   rank0 = 红方底线(WHITE/w) = 内部 row9
+ *   rank9 = 黑方底线(BLACK/b) = 内部 row0
+ *   转换：internal_row = 9 - pikafish_rank
  */
 public class ExternalEngine {
 
@@ -34,12 +36,43 @@ public class ExternalEngine {
     private volatile boolean ready = false;
     private Thread readerThread;
 
+    /** 引擎名称（从uciok行前的 id name 提取） */
+    private String engineName = "外部引擎";
+
+    /** UCI 选项（setoption name X value Y），在 isready 之前发送 */
+    private final Map<String, String> uciOptions = new LinkedHashMap<>();
+
     public ExternalEngine(String enginePath, Protocol protocol) {
         this.enginePath = enginePath;
         this.protocol   = protocol;
     }
 
     public String getEnginePath() { return enginePath; }
+
+    /**
+     * 设置UCI引擎参数（连接成功后、握手期间或重连时发送）。
+     * key=UCI选项名（如 "Threads"），value=值（如 "4"）。
+     * 调用此方法后需重新连接引擎才能生效（或在握手期间通过 sendOptions 发送）。
+     */
+    public void setOption(String name, String value) {
+        uciOptions.put(name, value);
+    }
+
+    /** 获取当前所有UCI选项（可用于UI回显） */
+    public Map<String, String> getOptions() {
+        return new LinkedHashMap<>(uciOptions);
+    }
+
+    /**
+     * 发送所有已设置的UCI选项（在握手期间 uciok 后、isready 前调用）。
+     */
+    private void sendOptions() {
+        for (Map.Entry<String, String> e : uciOptions.entrySet()) {
+            String cmd = "setoption name " + e.getKey() + " value " + e.getValue();
+            log(">>> " + cmd);
+            send(cmd);
+        }
+    }
 
     /**
      * 启动引擎进程并完成握手（阻塞，超时约8秒）。
@@ -86,6 +119,9 @@ public class ExternalEngine {
             log("!!! 握手失败");
             stop(); return false;
         }
+
+        // 在 isready 前发送所有预设的 UCI 选项
+        sendOptions();
 
         send("isready");
         if (!waitForKeyword("readyok", 8000)) {
@@ -155,18 +191,21 @@ public class ExternalEngine {
 
     /**
      * 同步等待引擎输出中出现包含 keyword 的行（握手阶段用）。
-     * 使用阻塞 readLine()，比 stdout.ready() 更可靠。
+     * 顺带解析 "id name ..." 行提取引擎名称。
      */
     private boolean waitForKeyword(String keyword, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         try {
-            // 用独立线程做超时读取
             final String[] found = {null};
             Thread t = new Thread(() -> {
                 try {
                     String line;
                     while ((line = engineOut.readLine()) != null) {
                         log("<<< [握手] " + line);
+                        // 提取引擎名
+                        if (line.startsWith("id name ")) {
+                            engineName = line.substring(8).trim();
+                        }
                         if (line.contains(keyword)) {
                             found[0] = line;
                             return;
@@ -281,12 +320,28 @@ public class ExternalEngine {
     public boolean isReady()      { return ready; }
     public Protocol getProtocol() { return protocol; }
 
+    /** 返回引擎名称（握手阶段从 "id name" 行解析，若无则返回文件名） */
     public String getName() {
+        if (engineName != null && !engineName.equals("外部引擎") && !engineName.isEmpty())
+            return engineName;
         java.io.File f = new java.io.File(enginePath);
         String n = f.getName();
         if (n.endsWith(".exe") || n.endsWith(".app"))
             n = n.substring(0, n.lastIndexOf('.'));
         return n;
+    }
+
+    /**
+     * 向已运行中的引擎发送单个 setoption 命令（实时生效，无需重启）。
+     * 仅在 ready=true 时有效。
+     */
+    public void sendOption(String name, String value) {
+        uciOptions.put(name, value);
+        if (ready) {
+            String cmd = "setoption name " + name + " value " + value;
+            log(">>> " + cmd);
+            send(cmd);
+        }
     }
 
     private static void log(String msg) {

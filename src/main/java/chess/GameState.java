@@ -149,7 +149,8 @@ public class GameState {
         MoveRecord rec = new MoveRecord(fr,fc,tr,tc,cap,snap,nota,redTurn,redTimeLeft,blackTimeLeft);
         rec.boardScore = Evaluator.evaluate(board);
         history.push(rec);
-        notations.add((redTurn?"红":"黑")+" "+nota);
+        // 棋谱格式：红方先走，奇数步=红，偶数步=黑，无需标色（规则已知）
+        notations.add(nota);
         redTurn = !redTurn;
         return cap;
     }
@@ -208,8 +209,9 @@ public class GameState {
     }
 
     /**
-     * 保存当前对局为 .cgame 文件（自定义文本格式）。
-     * 格式：每行一个字段，"KEY=VALUE"
+     * 保存当前对局为 .cgame 文件（自定义文本格式，VERSION=2）。
+     * 格式：每行一个字段，"KEY=VALUE"。
+     * 对于进行中的对局（result=null/"进行中"），额外保存当前FEN+走棋方，支持"继续对局"。
      */
     public void saveGame(String result) {
         try {
@@ -218,8 +220,11 @@ public class GameState {
             String fname = gameId + ".cgame";
             Path file = dir.resolve(fname);
 
+            boolean inProgress = (result == null || result.equals("进行中"));
+            if (inProgress) result = "进行中";
+
             StringBuilder sb = new StringBuilder();
-            sb.append("VERSION=1\n");
+            sb.append("VERSION=2\n");
             sb.append("DATE=").append(gameDate).append("\n");
             sb.append("HUMAN_IS_RED=").append(humanIsRed).append("\n");
             sb.append("DIFFICULTY=").append(difficulty.name()).append("\n");
@@ -227,6 +232,12 @@ public class GameState {
             sb.append("TC_BASE_MIN=").append(tcBaseMinutes).append("\n");
             sb.append("TC_INC_SEC=").append(tcIncSeconds).append("\n");
             sb.append("RESULT=").append(result).append("\n");
+            sb.append("IN_PROGRESS=").append(inProgress).append("\n");
+            // 保存当前FEN（含走棋方），用于"继续对局"
+            sb.append("CURRENT_FEN=").append(board.toFEN(redTurn)).append("\n");
+            sb.append("RED_TURN=").append(redTurn).append("\n");
+            sb.append("RED_TIME=").append(redTimeLeft).append("\n");
+            sb.append("BLACK_TIME=").append(blackTimeLeft).append("\n");
             sb.append("MOVES=");
 
             // 走法序列（从旧到新）
@@ -251,7 +262,7 @@ public class GameState {
         }
     }
 
-    /** 对局记录（用于加载列表） */
+    /** 对局记录（用于加载列表和继续对局） */
     public static class GameRecord {
         public final Path file;
         public final String date, result, difficulty, timeDesc;
@@ -259,17 +270,29 @@ public class GameState {
         public final List<int[]> moves;      // [fr,fc,tr,tc]
         public final List<Integer> scores;   // 每步评分
         public final List<String> notations;
+        // --- 继续对局所需字段 ---
+        public final boolean inProgress;     // true=对局进行中，可继续
+        public final String currentFen;      // 当前局面FEN（不含走棋方，单独用redTurn）
+        public final boolean redTurn;        // 当前走棋方
+        public final int redTimeLeft;        // 红方剩余时间（秒），-1=未知
+        public final int blackTimeLeft;      // 黑方剩余时间（秒），-1=未知
+        public final String difficultyName;  // 难度枚举名
 
         public GameRecord(Path f, String d, String r, String diff,
                           String td, boolean hir,
-                          List<int[]> mv, List<Integer> sc, List<String> no) {
+                          List<int[]> mv, List<Integer> sc, List<String> no,
+                          boolean ip, String fen, boolean rt, int rTime, int bTime) {
             this.file=f; this.date=d; this.result=r; this.difficulty=diff;
             this.timeDesc=td; this.humanIsRed=hir;
             this.moves=mv; this.scores=sc; this.notations=no;
+            this.inProgress=ip; this.currentFen=fen; this.redTurn=rt;
+            this.redTimeLeft=rTime; this.blackTimeLeft=bTime;
+            this.difficultyName=diff;
         }
 
         @Override public String toString() {
-            return date + "  " + (humanIsRed?"执红":"执黑") + "  " + result;
+            String status = inProgress ? "【进行中】" : "";
+            return date + "  " + (humanIsRed?"执红":"执黑") + "  " + result + status;
         }
     }
 
@@ -333,8 +356,16 @@ public class GameState {
                 if (!n.trim().isEmpty()) notas.add(n.trim());
             }
 
+            // VERSION=2 新增字段
+            boolean inProgress = Boolean.parseBoolean(kv.getOrDefault("IN_PROGRESS","false"));
+            String currentFen  = kv.getOrDefault("CURRENT_FEN","");
+            boolean redTurn    = Boolean.parseBoolean(kv.getOrDefault("RED_TURN","true"));
+            int redTime   = Integer.parseInt(kv.getOrDefault("RED_TIME","-1"));
+            int blackTime = Integer.parseInt(kv.getOrDefault("BLACK_TIME","-1"));
+
             return new GameRecord(file, date, result, diff, timeDesc, hir,
-                                  moves, scores, notas);
+                                  moves, scores, notas,
+                                  inProgress, currentFen, redTurn, redTime, blackTime);
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -345,27 +376,37 @@ public class GameState {
     // 中文棋谱
     // =====================================================================
     private String buildNotation(int fr, int fc, int tr, int tc, Piece[][] snap) {
+        return buildNotationStatic(fr, fc, tr, tc, snap, redTurn);
+    }
+
+    /**
+     * 静态版本，供外部（如外部引擎PV解析）调用。
+     * isRed: 走棋方是否为红方（决定列号和进退方向）。
+     */
+    public static String buildNotationStatic(int fr, int fc, int tr, int tc, Piece[][] snap, boolean isRed) {
+        if (snap == null || fr < 0 || fr > 9 || fc < 0 || fc > 8) return "?";
         Piece p = snap[fr][fc];
         if (p == null) return "?";
         String name = p.getDisplay();
-        String fromCol = p.isRed ? chCol(8-fc) : String.valueOf(fc+1);
+        String fromCol = p.isRed ? chColStatic(8-fc) : String.valueOf(fc+1);
         String dir = (fr==tr) ? "平" : (p.isRed ? (tr<fr?"进":"退") : (tr>fr?"进":"退"));
         String steps;
         if (fr == tr) {
-            steps = p.isRed ? chCol(8-tc) : String.valueOf(tc+1);
+            steps = p.isRed ? chColStatic(8-tc) : String.valueOf(tc+1);
         } else if (p.type==Piece.Type.HORSE || p.type==Piece.Type.ELEPHANT ||
                    p.type==Piece.Type.ADVISOR) {
-            steps = p.isRed ? chCol(8-tc) : String.valueOf(tc+1);
+            steps = p.isRed ? chColStatic(8-tc) : String.valueOf(tc+1);
         } else {
-            steps = p.isRed ? chNum(Math.abs(tr-fr)) : String.valueOf(Math.abs(tr-fr));
+            steps = p.isRed ? chNumStatic(Math.abs(tr-fr)) : String.valueOf(Math.abs(tr-fr));
         }
         return name+fromCol+dir+steps;
     }
 
-    private String chCol(int c) {
+    private static String chColStatic(int c) {
         return new String[]{"一","二","三","四","五","六","七","八","九"}[Math.max(0,Math.min(8,c))];
     }
-    private String chNum(int n) {
+    private static String chNumStatic(int n) {
         return n>=0&&n<=9 ? new String[]{"零","一","二","三","四","五","六","七","八","九"}[n] : String.valueOf(n);
     }
 }
+
