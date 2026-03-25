@@ -3,6 +3,7 @@ package chess;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.geom.*;
 
 public class Main {
     public static void main(String[] args) {
@@ -141,13 +142,42 @@ public class Main {
             main.add(settings, BorderLayout.CENTER);
 
             // ---- 按钮 ----
-            JPanel btns = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 0));
+            JPanel btns = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 4));
             btns.setOpaque(false);
-            JButton startBtn = new JButton("开始对局");
-            startBtn.setFont(new Font("宋体", Font.BOLD, 14));
-            startBtn.setBackground(new Color(0xB22222));
-            startBtn.setForeground(Color.WHITE);
-            startBtn.setPreferredSize(new Dimension(110, 34));
+
+            // 自定义绘制的开始按钮（确保在所有LookAndFeel下颜色清晰）
+            JButton startBtn = new JButton("开始对局") {
+                private boolean hovered = false;
+                @Override protected void paintComponent(Graphics g) {
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    Color bg = hovered ? new Color(0xCC3333) : new Color(0xA01010);
+                    g2.setColor(bg);
+                    g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
+                    g2.setColor(new Color(0xFF6666));
+                    g2.setStroke(new BasicStroke(1.5f));
+                    g2.drawRoundRect(1, 1, getWidth()-2, getHeight()-2, 8, 8);
+                    g2.setColor(Color.WHITE);
+                    g2.setFont(getFont());
+                    FontMetrics fm = g2.getFontMetrics();
+                    int tx = (getWidth() - fm.stringWidth(getText())) / 2;
+                    int ty = (getHeight() + fm.getAscent() - fm.getDescent()) / 2;
+                    g2.drawString(getText(), tx, ty);
+                    g2.dispose();
+                }
+                { // 初始化块
+                    addMouseListener(new MouseAdapter() {
+                        public void mouseEntered(MouseEvent e) { hovered = true;  repaint(); }
+                        public void mouseExited (MouseEvent e) { hovered = false; repaint(); }
+                    });
+                    setContentAreaFilled(false);
+                    setBorderPainted(false);
+                    setFocusPainted(false);
+                    setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                }
+            };
+            startBtn.setFont(new Font("宋体", Font.BOLD, 15));
+            startBtn.setPreferredSize(new Dimension(120, 38));
             startBtn.addActionListener(e -> {
                 humanIsRed = redBtn.isSelected();
                 int di = diffBox.getSelectedIndex();
@@ -163,10 +193,42 @@ public class Main {
                 confirmed = true;
                 dispose();
             });
-            JButton quitBtn = new JButton("退出");
+
+            // 退出按钮
+            JButton quitBtn = new JButton("退出") {
+                private boolean hovered = false;
+                @Override protected void paintComponent(Graphics g) {
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    Color bg = hovered ? new Color(0x888888) : new Color(0x666666);
+                    g2.setColor(bg);
+                    g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
+                    g2.setColor(new Color(0xAAAAAA));
+                    g2.setStroke(new BasicStroke(1f));
+                    g2.drawRoundRect(1, 1, getWidth()-2, getHeight()-2, 8, 8);
+                    g2.setColor(Color.WHITE);
+                    g2.setFont(getFont());
+                    FontMetrics fm = g2.getFontMetrics();
+                    int tx = (getWidth() - fm.stringWidth(getText())) / 2;
+                    int ty = (getHeight() + fm.getAscent() - fm.getDescent()) / 2;
+                    g2.drawString(getText(), tx, ty);
+                    g2.dispose();
+                }
+                { // 初始化块
+                    addMouseListener(new MouseAdapter() {
+                        public void mouseEntered(MouseEvent e) { hovered = true;  repaint(); }
+                        public void mouseExited (MouseEvent e) { hovered = false; repaint(); }
+                    });
+                    setContentAreaFilled(false);
+                    setBorderPainted(false);
+                    setFocusPainted(false);
+                    setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                }
+            };
             quitBtn.setFont(new Font("宋体", Font.PLAIN, 13));
-            quitBtn.setPreferredSize(new Dimension(80, 34));
+            quitBtn.setPreferredSize(new Dimension(80, 38));
             quitBtn.addActionListener(e -> dispose());
+
             btns.add(startBtn); btns.add(quitBtn);
             main.add(btns, BorderLayout.SOUTH);
 

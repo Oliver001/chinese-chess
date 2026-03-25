@@ -739,29 +739,32 @@ public class AIEngine {
     /**
      * 根据搜索分值判断绝杀步数（站在 AI 视角）。
      *
-     * 绝杀定义：当前局面，某方走一步后对方无论如何都无法避免被将死。
+     * 本引擎使用绝对视角（正=红方优，负=黑方优），因此：
+     *   sc >= MATE_TH  → 红方赢（不一定是AI赢！）
+     *   sc <= -MATE_TH → 黑方赢
      *
-     * alphaBeta 编码约定（根节点 ply=0，maxing=aiIsRed）：
-     *   吃将：val = maxing ? INF-(ply+1) : -(INF-(ply+1))
-     *   将死：val = maxing ? -(INF-ply) : (INF-ply)
-     * 两者等价：半步数 = INF - |sc|
+     * 需要结合 aiIsRed 判断是 AI 赢还是对手赢：
+     *   aiIsRed=true  && sc >= MATE_TH  → AI(红)赢 → mateIn > 0
+     *   aiIsRed=true  && sc <= -MATE_TH → 对手(黑)赢 → mateIn < 0
+     *   aiIsRed=false && sc <= -MATE_TH → AI(黑)赢 → mateIn > 0
+     *   aiIsRed=false && sc >= MATE_TH  → 对手(红)赢 → mateIn < 0
      *
-     * 根节点收到的 sc：
-     *   sc ≥ MATE_TH：AI 赢，半步数 half = INF - sc，全步 = ceil(half / 2)
-     *   sc ≤ -MATE_TH：对手赢，半步数 half = INF + sc，全步 = ceil(half / 2)
-     *
-     * @param sc      alphaBeta 根节点返回的评分
-     * @param aiIsRed AI 执红还是执黑（影响 mateIn 语义展示，不影响计算）
+     * @param sc      alphaBeta 根节点返回的评分（绝对视角，正=红优）
+     * @param aiIsRed AI 执红还是执黑
      * @return > 0：AI 将死对手的全步数；< 0：对手将死 AI 的全步数（取负后为步数）；= 0：无绝杀
      */
     private int detectMate(int sc, boolean aiIsRed) {
         final int MATE_TH = INF - MAX_DEPTH * 2 - 10;
         if (sc >= MATE_TH) {
-            int half = INF - sc;          // 半步数（每方走一步算1个半步）
-            return Math.max(1, (half + 1) / 2); // 半步→全步（向上取整）
+            // 红方赢
+            int half = INF - sc;
+            int steps = Math.max(1, (half + 1) / 2);
+            return aiIsRed ? steps : -steps; // AI执红→AI赢；AI执黑→对手赢
         } else if (sc <= -MATE_TH) {
+            // 黑方赢
             int half = INF + sc;
-            return -Math.max(1, (half + 1) / 2);
+            int steps = Math.max(1, (half + 1) / 2);
+            return aiIsRed ? -steps : steps; // AI执红→对手赢；AI执黑→AI赢
         }
         return 0;
     }
