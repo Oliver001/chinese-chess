@@ -20,9 +20,9 @@ import java.util.function.BiConsumer;
  *   帅/将：只能在己方九宫（3×3）
  *   仕/士：只能在己方九宫
  *   相/象：只能在己方半边（不过河）
- *   兵/卒：红兵在行0-6(红方在下行6以下含6)，黑卒在行3-9
- *           实际上只限：红兵不能放黑方底线两行（行0-1），黑卒不能放红方底线两行（行8-9）
- *           强规则：兵/卒不能放在己方底线一行（未开始进攻位置视为合法）
+ *   兵/卒：只限制不能放在己方底线（无实战意义）
+ *           红兵不能放行9（己方底线），黑卒不能放行0（己方底线）
+ *           对方底线行（行0/行9）允许放置，残局摆谱需要
  *   马/车/炮：全盘任意位置
  */
 public class EditBoardDialog extends JDialog {
@@ -407,8 +407,8 @@ public class EditBoardDialog extends JDialog {
      * 1. 该格已有同类同色棋子 → 不允许（等于没有空位）
      * 2. 帅/将、仕/士 → 只能在九宫内
      * 3. 相/象 → 只能在己方半边
-     * 4. 兵/卒 → 不能放在己方底线行（红兵不能在行0，黑卒不能在行9）
-     *             更宽松规则：兵/卒可以在任意位置（过河后横走由走法规则控制）
+     * 4. 兵/卒 → 不能放在己方底线（红兵不能在行9，黑卒不能在行0）
+     *             残局中兵/卒可以到达对方底线，摆谱应允许
      * 5. 数量未超上限
      */
     private boolean canPlace(Piece piece, int row, int col) {
@@ -436,10 +436,12 @@ public class EditBoardDialog extends JDialog {
                 if (piece.isRed) return row >= 5;
                 else             return row <= 4;
             case PAWN:
-                // 兵/卒不能放在己方底线（红兵不在行9，黑卒不在行0）
-                // 严格限制：红兵只能在行0-8，黑卒只能在行1-9
-                if (piece.isRed) return row <= 8; // 红兵不能放在黑方底线行行9（基本合理）
-                else             return row >= 1; // 黑卒不能放在红方底线行行0（基本合理）
+                // 兵/卒可以放全盘任意位置（残局中兵/卒可以到达对方底线）
+                // 坐标：行0=黑方底线，行9=红方底线
+                // 只限制不能放在己方底线（无实战意义）
+                // 红兵不能放行9（红方自己底线），黑卒不能放行0（黑方自己底线）
+                if (piece.isRed) return row <= 8; // 红兵可以到达行0（黑方底线），不能放行9（己方底线）
+                else             return row >= 1; // 黑卒可以到达行9（红方底线），不能放行0（己方底线）
             default:
                 return true; // 马/车/炮 全盘任意
         }
@@ -455,7 +457,7 @@ public class EditBoardDialog extends JDialog {
             case HORSE:    return side + (isRed?"马":"馬") + "：最多" + max + "个，全盘任意";
             case ROOK:     return side + (isRed?"车":"車") + "：最多" + max + "个，全盘任意";
             case CANNON:   return side + (isRed?"炮":"砲") + "：最多" + max + "个，全盘任意";
-            case PAWN:     return side + (isRed?"兵":"卒") + "：最多" + max + "个，不能放对方底线";
+            case PAWN:     return side + (isRed?"兵":"卒") + "：最多" + max + "个，可全盘放置（含对方底线）";
             default:       return "";
         }
     }
