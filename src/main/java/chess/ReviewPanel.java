@@ -124,18 +124,25 @@ public class ReviewPanel extends JPanel {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         notationTable = new JTable(notationModel);
-        notationTable.setFont(new Font("宋体", Font.PLAIN, 12));
-        notationTable.setRowHeight(20);
-        notationTable.setShowGrid(false);
-        notationTable.setIntercellSpacing(new Dimension(0, 0));
+        notationTable.setFont(new Font("宋体", Font.PLAIN, 11));
+        notationTable.setRowHeight(18);
+        notationTable.setShowGrid(true);
+        notationTable.setGridColor(new Color(0xE0C090));
+        notationTable.setIntercellSpacing(new Dimension(2, 1));
         notationTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         notationTable.setBackground(new Color(0xFFFAF0));
         notationTable.setSelectionBackground(new Color(0xFFE0A0));
         notationTable.setSelectionForeground(Color.BLACK);
-        // 列宽：序号列窄，走法列等分
+        notationTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);  // 关闭自动拉伸，启用水平滚动
+        // 列宽：序号列24px，走法列55px（55×4+24×2=268px，超出宽度时可水平滚动）
         TableColumnModel tcm = notationTable.getColumnModel();
-        tcm.getColumn(0).setPreferredWidth(28); tcm.getColumn(0).setMaxWidth(36);
-        tcm.getColumn(3).setPreferredWidth(28); tcm.getColumn(3).setMaxWidth(36);
+        int[] colWidths = {24, 55, 55, 24, 55, 55};
+        for (int i = 0; i < colWidths.length; i++) {
+            tcm.getColumn(i).setPreferredWidth(colWidths[i]);
+            tcm.getColumn(i).setMinWidth(colWidths[i]);
+        }
+        // 表头字体也缩小
+        notationTable.getTableHeader().setFont(new Font("宋体", Font.BOLD, 10));
         // 填充棋谱数据（与 ChessPanel.updateNotation 逻辑一致）
         refreshNotationTable();
         // 点击行跳转到对应步
@@ -165,7 +172,9 @@ public class ReviewPanel extends JPanel {
                 gotoStep(baseStep);
             }
         });
-        JScrollPane listScroll = new JScrollPane(notationTable);
+        JScrollPane listScroll = new JScrollPane(notationTable,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         listScroll.setBorder(BorderFactory.createTitledBorder(
             BorderFactory.createLineBorder(new Color(0xC8A060)), "棋谱",
             TitledBorder.CENTER, TitledBorder.TOP,
