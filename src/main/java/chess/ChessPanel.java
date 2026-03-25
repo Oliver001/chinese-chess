@@ -996,10 +996,64 @@ public class ChessPanel extends JPanel {
         String diffLabel = gs.difficulty.label;
         int timeMs = gs.difficulty.aiTimeMs;
 
-        setStatus("AI 思考中... [" + diffLabel + "]", false);
+        setStatus("查询开局库...", false);
         sourceLabel.setText("<html><center>🔍 查询云库/开局库...</center></html>");
         mateLabel.setText(" ");
         mateLabel.setBackground(new Color(0xF5E6C8));
+
+        // ── 先在后台查开局库，命中则直接走棋，否则交给内置AI ──
+        final Board boardForBook = new Board();
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 9; c++)
+                boardForBook.grid[r][c] = gs.board.grid[r][c] != null
+                        ? gs.board.grid[r][c].copy() : null;
+        final boolean redTurnForBook = gs.redTurn;
+
+        new Thread(() -> {
+            OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(boardForBook, redTurnForBook);
+            if (bookResult != null) {
+                final int[] bmv = bookResult.move;
+                Piece movingPiece = boardForBook.getPiece(bmv[0], bmv[1]);
+                boolean valid = movingPiece != null && movingPiece.isRed == redTurnForBook
+                        && bmv[2] >= 0 && bmv[2] <= 9 && bmv[3] >= 0 && bmv[3] <= 8;
+                if (!valid) bookResult = null;
+            }
+            final OpeningBook.LookupResult finalBook = bookResult;
+            SwingUtilities.invokeLater(() -> {
+                if (!aiThinking) return;
+                if (finalBook != null) {
+                    // 开局库命中，直接走棋
+                    final int[] bmv = finalBook.move;
+                    final boolean fromCloud = finalBook.fromCloud;
+                    animTimer.stop();
+                    renderSnapshot = null;
+                    boolean wasRed = gs.redTurn;
+                    lastFR=bmv[0]; lastFC=bmv[1]; lastTR=bmv[2]; lastTC=bmv[3];
+                    boolean isCapture = gs.board.getPiece(bmv[2], bmv[3]) != null;
+                    Piece cap = gs.doMove(bmv[0], bmv[1], bmv[2], bmv[3]);
+                    gs.applyIncrement(wasRed);
+                    aiThinking = false;
+                    if (isCapture) sound.playCapture(); else sound.playMove();
+                    updateNotation();
+                    updateAdvantage(Evaluator.evaluate(gs.board));
+                    sourceLabel.setText("<html><center>" + (fromCloud ? "☁ 云库" : "📖 本地开局库") + "</center></html>");
+                    mateLabel.setText(" ");
+                    mateLabel.setBackground(new Color(0xF5E6C8));
+                    bestMoveArea.setText("（开局库走法）");
+                    checkGameOver(cap);
+                    boardPanel.repaint();
+                } else {
+                    // 开局库未命中，启动内置AI搜索
+                    setStatus("AI 思考中... [" + diffLabel + "]", false);
+                    triggerBuiltinAISearch(timeMs);
+                }
+            });
+        }, "BookLookup-BuiltinAI").start();
+    }
+
+    /** 内置AI实际搜索（开局库未命中后调用） */
+    private void triggerBuiltinAISearch(int timeMs) {
+        if (!aiThinking || gs.gameOver) return;
         // 不在此处更新优势条——等AI搜索过程中通过 statsListener 逐步更新（真实评分）
 
         // AI在后台线程运行，不会影响EDT和渲染
