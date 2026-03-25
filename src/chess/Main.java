@@ -11,24 +11,12 @@ public class Main {
         catch (Exception ignored) {}
 
         SwingUtilities.invokeLater(() -> {
-            // 先显示开局设置对话框
-            StartupDialog dialog = new StartupDialog();
-            dialog.setLocationRelativeTo(null);
-            dialog.setVisible(true);
-
-            if (!dialog.confirmed) return; // 关闭则退出
-
-            JFrame frame = new JFrame("中国象棋 — 人机对弈  v4.0");
+            JFrame frame = new JFrame("中国象棋  v4.0");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             frame.setResizable(true);
 
-            ChessPanel panel = new ChessPanel(
-                dialog.humanIsRed,
-                dialog.difficulty,
-                dialog.timeControl,
-                dialog.tcBaseMinutes,
-                dialog.tcIncSeconds
-            );
+            // 直接创建空棋盘界面，等待用户从菜单选择操作
+            ChessPanel panel = new ChessPanel();
             frame.setJMenuBar(panel.createMenuBar());
             frame.add(panel);
             frame.pack();

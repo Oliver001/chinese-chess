@@ -71,11 +71,58 @@ public class ChessPanel extends JPanel {
     private boolean paused = false;
     private JMenuItem pauseMenuItem;  // 暂停/继续菜单项（成员变量方便更新文字）
 
+    // ---- 空棋盘模式（未开始对局）----
+    private boolean idleMode = false;  // true=空棋盘等待状态，不允许走棋
+
     // ===================== 构造 =====================
-    /** 无参构造（兼容旧代码，使用默认设置） */
+    /** 空棋盘构造（启动时用）：显示空棋盘，等待用户从菜单选择操作 */
     public ChessPanel() {
-        this(true, GameState.Difficulty.MEDIUM,
-             GameState.TimeControl.INCREMENTAL, 20, 5);
+        idleMode = true;
+        animTimer = new Timer(350, e -> { if (aiThinking) boardPanel.repaint(); });
+        animTimer.setRepeats(true);
+
+        setLayout(new BorderLayout());
+        boardPanel = createBoardPanel();
+        add(boardPanel, BorderLayout.CENTER);
+        sidePanel = createSidePanel();
+        add(sidePanel, BorderLayout.EAST);
+
+        addComponentListener(new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent e) {
+                int totalW = getWidth();
+                if (totalW <= 0) return;
+                int newSideW = Math.max(188, (int)(totalW * 0.24));
+                Dimension cur = sidePanel.getPreferredSize();
+                if (cur.width != newSideW) {
+                    sidePanel.setPreferredSize(new Dimension(newSideW, cur.height));
+                    revalidate();
+                }
+            }
+        });
+
+        // 清空棋盘，显示欢迎状态
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 9; c++)
+                gs.board.grid[r][c] = null;
+        gs.gameOver = true; // 阻止走棋和AI
+        redSideLabel.setText("红方");
+        blackSideLabel.setText("黑方");
+        statusLabel.setText("请从菜单选择操作");
+        statusLabel.setForeground(new Color(0x555555));
+        advantageLabel.setText("—");
+        updateTimeLabels();
+        refreshTimePanelOrder();
+
+        ai.setStatsListener(s -> {
+            latestStats = s;
+            SwingUtilities.invokeLater(() -> {
+                updateSourceLabel(s);
+                updateBestMoveArea(s);
+                updateMateLabel(s);
+                updateAdvantage(s.boardScore);
+            });
+        });
+        startClock();
     }
 
     /** 带参构造：由开局对话框传入设置 */
@@ -371,10 +418,11 @@ public class ChessPanel extends JPanel {
         JMenu gameMenu = new JMenu("对局(G)");
         gameMenu.setMnemonic('G');
 
-        JMenuItem newGameItem = new JMenuItem("新游戏(N)");
-        newGameItem.setMnemonic('N');
-        newGameItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_N, InputEvent.CTRL_DOWN_MASK));
-        newGameItem.addActionListener(e -> showNewGameDialog());
+        // 开始对局（仅空棋盘/初始状态下需要，功能等同于新游戏）
+        JMenuItem startItem = new JMenuItem("开始对局(B)");
+        startItem.setMnemonic('B');
+        startItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_N, InputEvent.CTRL_DOWN_MASK));
+        startItem.addActionListener(e -> showNewGameDialog());
 
         JMenuItem undoItem = new JMenuItem("悔棋(U)");
         undoItem.setMnemonic('U');
@@ -390,7 +438,7 @@ public class ChessPanel extends JPanel {
         historyItem.setMnemonic('H');
         historyItem.addActionListener(e -> ReviewPanel.showReviewDialog(this));
 
-        JMenuItem editItem = new JMenuItem("编辑棋局(E)");
+        JMenuItem editItem = new JMenuItem("摆谱/编辑棋局(E)");
         editItem.setMnemonic('E');
         editItem.addActionListener(e -> enterEditMode());
 
@@ -406,7 +454,7 @@ public class ChessPanel extends JPanel {
         loadFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
         loadFenItem.addActionListener(e -> loadFEN());
 
-        gameMenu.add(newGameItem);
+        gameMenu.add(startItem);
         gameMenu.add(undoItem);
         gameMenu.add(pauseMenuItem);
         gameMenu.add(sep1);
@@ -521,6 +569,7 @@ public class ChessPanel extends JPanel {
 
     // ===================== 人类走棋 =====================
     private void handleClick(int px, int py) {
+        if (idleMode) return; // 空棋盘模式，不允许走棋
         int col = pixelToLogicCol(px);
         int row = pixelToLogicRow(py);
         if (!gs.board.inBounds(row, col)) return;
@@ -546,8 +595,9 @@ public class ChessPanel extends JPanel {
 
                 if (isCapture) sound.playCapture(); else sound.playMove();
                 updateNotation();
-                int boardScoreAfter = Evaluator.evaluate(gs.board);
-                updateAdvantage(boardScoreAfter);
+                // ★ 人走棋后不立即更新优势条（避免"谁走棋谁领先"错觉）
+                // 优势条由 AI 搜索结果统一更新（statsListener 中的 updateAdvantage）
+                // 仅在游戏结束时才通过 checkGameOver 极值更新
                 mateLabel.setText(" ");
                 mateLabel.setForeground(new Color(0xCC0000));
                 mateLabel.setBackground(new Color(0xF5E6C8));
@@ -579,8 +629,7 @@ public class ChessPanel extends JPanel {
         sourceLabel.setText("<html><center>🔍 查询云库/开局库...</center></html>");
         mateLabel.setText(" ");
         mateLabel.setBackground(new Color(0xF5E6C8));
-        // 优势条显示当前局面（人刚走完后的评分）
-        updateAdvantage(Evaluator.evaluate(gs.board));
+        // 不在此处更新优势条——等AI搜索过程中通过 statsListener 逐步更新（真实评分）
 
         // AI在后台线程运行，不会影响EDT和渲染
         SwingWorker<int[], Void> worker = new SwingWorker<int[], Void>() {
@@ -746,6 +795,7 @@ public class ChessPanel extends JPanel {
         gs.tcIncSeconds  = (int) preset[3];
         gs.reset(); // 使用新时制重置
 
+        idleMode = false; // 退出空棋盘模式
         selRow=-1; selCol=-1; legalMoves=null;
         lastFR=-1; lastFC=-1; lastTR=-1; lastTC=-1;
         aiThinking=false; renderSnapshot=null;
