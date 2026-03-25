@@ -18,7 +18,7 @@
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- 最终输出的可执行jar名称 -->
-        <final.jar.name>chess_v14</final.jar.name>
+        <final.jar.name>chess_v15</final.jar.name>
     </properties>
 
     <!-- 本项目无外部依赖，只使用标准Java库（Swing/AWT/java.net 等） -->

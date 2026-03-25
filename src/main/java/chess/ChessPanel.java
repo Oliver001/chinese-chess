@@ -172,7 +172,7 @@ public class ChessPanel extends JPanel {
             @Override public void componentResized(ComponentEvent e) {
                 int totalW = getWidth();
                 if (totalW <= 0) return;
-                int newSideW = Math.max(188, (int)(totalW * 0.24));
+                int newSideW = Math.max(370, (int)(totalW * 0.30));
                 Dimension cur = sidePanel.getPreferredSize();
                 if (cur.width != newSideW) {
                     sidePanel.setPreferredSize(new Dimension(newSideW, cur.height));
@@ -231,12 +231,12 @@ public class ChessPanel extends JPanel {
         sidePanel = createSidePanel();
         add(sidePanel, BorderLayout.EAST);
 
-        // 监听整体面板尺寸变化，动态调整右侧栏宽度（约占总宽 24%，最小 188px）
+        // 监听整体面板尺寸变化，动态调整右侧栏宽度（约占总宽 30%，最小 370px，适配6列棋谱）
         addComponentListener(new ComponentAdapter() {
             @Override public void componentResized(ComponentEvent e) {
                 int totalW = getWidth();
                 if (totalW <= 0) return;
-                int newSideW = Math.max(188, (int)(totalW * 0.24));
+                int newSideW = Math.max(370, (int)(totalW * 0.30));
                 Dimension cur = sidePanel.getPreferredSize();
                 if (cur.width != newSideW) {
                     sidePanel.setPreferredSize(new Dimension(newSideW, cur.height));

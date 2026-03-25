@@ -80,8 +80,9 @@ public class OpeningBook {
 
         if (currentMode == BookMode.CLOUD_AND_LOCAL) {
             // --- 在线查询 ---
+            // 使用 toUCCIFEN：棋子段同 toFEN，但走棋方标记 b=红方/w=黑方（chessdb约定）
             try {
-                String fen = board.toFEN(isRed);
+                String fen = board.toUCCIFEN(isRed);
                 String fenEncoded = URLEncoder.encode(fen, "UTF-8");
                 String urlStr = API_URL + "?action=queryall&board=" + fenEncoded
                               + "&learn=0&egtbmetric=dtm";
@@ -105,7 +106,14 @@ public class OpeningBook {
                         !resp.startsWith("checkmate") && !resp.startsWith("stalemate")) {
 
                         int[] mv = parseBestFromQueryAll(resp);
-                        if (mv != null) return new LookupResult(mv, true);
+                        if (mv != null) {
+                            // 合法性验证：起点有棋子且颜色正确
+                            Piece movingPiece = board.getPiece(mv[0], mv[1]);
+                            if (movingPiece != null && movingPiece.isRed == isRed) {
+                                return new LookupResult(mv, true);
+                            }
+                            // 云库走法非法，静默回退到本地库
+                        }
                     }
                 } else {
                     conn.disconnect();

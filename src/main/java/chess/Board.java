@@ -300,6 +300,32 @@ public class Board {
         return sb.toString();
     }
 
+    /**
+     * 生成 chessdb.cn UCCI 标准 FEN。
+     * chessdb FEN 棋子段与 toFEN 相同（row0到row9），但走棋方标记相反：
+     *   b=红方（row9大写那侧），w=黑方（row0小写那侧）
+     */
+    public String toUCCIFEN(boolean redTurn) {
+        StringBuilder sb = new StringBuilder();
+        // 棋子段与toFEN相同（内部 r=0..9 顺序输出）
+        for (int r = 0; r < 10; r++) {
+            int empty = 0;
+            for (int c = 0; c < 9; c++) {
+                Piece p = grid[r][c];
+                if (p == null) { empty++; }
+                else {
+                    if (empty > 0) { sb.append(empty); empty = 0; }
+                    sb.append(pieceToFENChar(p));
+                }
+            }
+            if (empty > 0) sb.append(empty);
+            if (r < 9) sb.append('/');
+        }
+        // chessdb UCCI：b=红方，w=黑方（与UCI/皮卡鱼相反）
+        sb.append(redTurn ? " b" : " w");
+        return sb.toString();
+    }
+
     private char pieceToFENChar(Piece p) {
         char c;
         switch(p.type){
