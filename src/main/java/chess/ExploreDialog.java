@@ -68,7 +68,8 @@ public class ExploreDialog extends JDialog {
     private JLabel turnLabel;    // 当前走棋方
     private JLabel scoreLabel;   // 实时评分
     private JProgressBar scoreBar;
-    private JTextArea notationArea;  // 推演棋谱（简单列表）
+    private javax.swing.JTable notationTable;                          // 推演棋谱（6列表格）
+    private javax.swing.table.DefaultTableModel notationModel;         // 棋谱数据模型
     private JTextArea analysisArea;  // AI分析结果
     private JButton undoBtn, resetBtn, analyzeBtn, stopAnalyzeBtn;
     private JLabel statusLabel;
@@ -197,16 +198,36 @@ public class ExploreDialog extends JDialog {
         right.add(topPanel, BorderLayout.NORTH);
 
         // 中部：推演棋谱 + AI分析（各占约一半，可拖动）
-        // 推演棋谱
-        notationArea = new JTextArea();
-        notationArea.setFont(new Font("宋体", Font.PLAIN, 12));
-        notationArea.setEditable(false);
-        notationArea.setBackground(new Color(0xFFFAF0));
-        notationArea.setForeground(new Color(0x333333));
-        notationArea.setLineWrap(true);
-        notationArea.setWrapStyleWord(false);
-        notationArea.setText("（走棋后将在此显示推演棋谱）");
-        JScrollPane notaScroll = new JScrollPane(notationArea,
+        // 推演棋谱：6列JTable，与对弈界面一致（序,红,黑,序,红,黑）
+        notationModel = new javax.swing.table.DefaultTableModel(
+                new Object[]{"序", "红方", "黑方", "序", "红方", "黑方"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        notationTable = new javax.swing.JTable(notationModel);
+        notationTable.setFont(new Font("宋体", Font.PLAIN, 12));
+        notationTable.setRowHeight(20);
+        notationTable.setBackground(new Color(0xFFFAF0));
+        notationTable.setGridColor(new Color(0xDDC080));
+        notationTable.setShowGrid(true);
+        notationTable.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        notationTable.getTableHeader().setFont(new Font("宋体", Font.BOLD, 12));
+        notationTable.getTableHeader().setBackground(new Color(0xF0D080));
+        notationTable.getTableHeader().setReorderingAllowed(false);
+        notationTable.getTableHeader().setResizingAllowed(true);
+        // 列宽：序号窄，走法均分，两组各占一半
+        int[] colWidths = {28, 62, 62, 28, 62, 62};
+        for (int ci = 0; ci < colWidths.length; ci++) {
+            notationTable.getColumnModel().getColumn(ci).setPreferredWidth(colWidths[ci]);
+            if (ci == 0 || ci == 3)
+                notationTable.getColumnModel().getColumn(ci).setMaxWidth(36);
+        }
+        // 居中对齐（所有列）
+        javax.swing.table.DefaultTableCellRenderer center = new javax.swing.table.DefaultTableCellRenderer();
+        center.setHorizontalAlignment(SwingConstants.CENTER);
+        for (int ci = 0; ci < 6; ci++)
+            notationTable.getColumnModel().getColumn(ci).setCellRenderer(center);
+
+        JScrollPane notaScroll = new JScrollPane(notationTable,
                 JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         notaScroll.setBorder(BorderFactory.createTitledBorder(
@@ -372,7 +393,7 @@ public class ExploreDialog extends JDialog {
         undoBtn.setEnabled(false);
         updateScoreDisplay();
         updateTurnLabel();
-        notationArea.setText("（走棋后将在此显示推演棋谱）");
+        notationModel.setRowCount(0);
         statusLabel.setText("已重置到初始传入局面");
         boardPanel.repaint();
     }
@@ -751,53 +772,56 @@ public class ExploreDialog extends JDialog {
     }
 
     private void updateNotationArea() {
-        // 从步骤栈重建棋谱
+        // 从步骤栈重建棋谱列表（时序顺序）
         List<StepRecord> recs = new ArrayList<>(stepStack);
         Collections.reverse(recs);
-        if (recs.isEmpty()) {
-            notationArea.setText("（走棋后将在此显示推演棋谱）");
-            return;
+        notationModel.setRowCount(0);
+        if (recs.isEmpty()) return;
+
+        // 构建走法字符串列表（按先走方顺序排列）
+        // 注意：棋谱从initRedTurn方开始，每步交替
+        List<String> notaList = new ArrayList<>();
+        for (StepRecord rec : recs) {
+            notaList.add(GameState.buildNotationStatic(
+                    rec.fr, rec.fc, rec.tr, rec.tc, rec.snapshot, rec.wasRed));
         }
-        StringBuilder sb = new StringBuilder();
-        // 按回合组织：每回合两步（红/黑），并在每步前标注走棋方
-        int roundNum = 1;
-        for (int i = 0; i < recs.size(); ) {
-            StepRecord rec = recs.get(i);
-            String nota = GameState.buildNotationStatic(rec.fr, rec.fc, rec.tr, rec.tc, rec.snapshot, rec.wasRed);
-            if (rec.wasRed) {
-                // 红方走法，开始新回合
-                sb.append(roundNum).append(". 红 ").append(nota);
-                i++;
-                if (i < recs.size() && !recs.get(i).wasRed) {
-                    // 同回合黑方走法
-                    StepRecord blackRec = recs.get(i);
-                    String blackNota = GameState.buildNotationStatic(
-                        blackRec.fr, blackRec.fc, blackRec.tr, blackRec.tc,
-                        blackRec.snapshot, blackRec.wasRed);
-                    sb.append(" → 黑 ").append(blackNota);
-                    i++;
-                }
-                sb.append("\n");
-                roundNum++;
-            } else {
-                // 黑方先走（黑方执先手或黑方开始分析的局面）
-                sb.append(roundNum).append(". 黑 ").append(nota);
-                i++;
-                if (i < recs.size() && recs.get(i).wasRed) {
-                    StepRecord redRec = recs.get(i);
-                    String redNota = GameState.buildNotationStatic(
-                        redRec.fr, redRec.fc, redRec.tr, redRec.tc,
-                        redRec.snapshot, redRec.wasRed);
-                    sb.append(" → 红 ").append(redNota);
-                    i++;
-                }
-                sb.append("\n");
-                roundNum++;
+
+        // 判断棋谱起始方：第一步的走棋方
+        // 如果第一步是黑方走，则序号从"黑"列开始填入
+        // 这里沿用ChessPanel逻辑：每行存4个走法（两手），格式 [seq1,红1,黑1,seq2,红2,黑2]
+        // 推演时可能从黑方开局，需处理奇偶位置
+        boolean firstIsRed = !recs.isEmpty() && recs.get(0).wasRed;
+
+        // 若非从红方开始，先补一个空位，使红方始终在第一个走法列
+        // 规则：红方对应 notaList 奇数位（0-indexed），黑方对应偶数位 —— 若首步是黑方则反之
+        // 简化处理：严格按"每回合红→黑"排列，非红开局时第一格留空
+        int offset = firstIsRed ? 0 : 1; // 黑先走则在偶数位（补一个空格）
+
+        // 构建含偏移的列表
+        List<String> padded = new ArrayList<>();
+        for (int i = 0; i < offset; i++) padded.add("");
+        padded.addAll(notaList);
+
+        // 按4个一行填入表格（每行两手棋）
+        int totalMoveSlots = padded.size();
+        int roundBase = firstIsRed ? 1 : 1; // 回合从1开始
+        for (int i = 0; i < totalMoveSlots; i += 4) {
+            int moveNo1 = i / 2 + roundBase;
+            String red1 = i     < totalMoveSlots ? padded.get(i)   : "";
+            String blk1 = i + 1 < totalMoveSlots ? padded.get(i+1) : "";
+            Object seq2 = "", red2 = "", blk2 = "";
+            if (i + 2 < totalMoveSlots) {
+                seq2 = i / 2 + roundBase + 1;
+                red2 = i + 2 < totalMoveSlots ? padded.get(i+2) : "";
+                blk2 = i + 3 < totalMoveSlots ? padded.get(i+3) : "";
             }
+            notationModel.addRow(new Object[]{moveNo1, red1, blk1, seq2, red2, blk2});
         }
-        notationArea.setText(sb.toString().stripTrailing());
-        // 滚动到底
-        notationArea.setCaretPosition(notationArea.getDocument().getLength());
+        // 自动滚动到最新一行
+        if (notationModel.getRowCount() > 0) {
+            int last = notationModel.getRowCount() - 1;
+            notationTable.scrollRectToVisible(notationTable.getCellRect(last, 0, true));
+        }
     }
 
     // ========================================================================

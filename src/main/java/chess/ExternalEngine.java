@@ -153,6 +153,7 @@ public class ExternalEngine {
 
     /**
      * 请求引擎搜索最优走法（异步，结果通过回调返回）。
+     * 外部引擎固定使用 10 秒思考时间 + 深度上限 22。
      */
     public void requestMove(Board board, boolean redTurn, int timeLimitMs,
                             Consumer<int[]> onMove, Consumer<String> onInfo) {
@@ -168,7 +169,9 @@ public class ExternalEngine {
         log(">>> position fen " + fen);
         send("position fen " + fen);
 
-        String goCmd = "go movetime " + timeLimitMs;
+        // 外部引擎：固定10秒思考时间 + 深度限制22
+        int externalTimeMs = 10000;
+        String goCmd = "go movetime " + externalTimeMs + " depth 22";
         log(">>> " + goCmd);
         send(goCmd);
     }
