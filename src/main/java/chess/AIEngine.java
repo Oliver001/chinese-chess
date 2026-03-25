@@ -161,11 +161,19 @@ public class AIEngine {
         // 1. 查开局/云库
         OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(board, aiIsRed);
         if (bookResult != null) {
-            stats.source = bookResult.fromCloud ? MoveSource.CLOUD_BOOK : MoveSource.LOCAL_BOOK;
-            stats.elapsedMs = System.currentTimeMillis() - startTime;
-            stats.bestMove = bookResult.move;
-            notifyStats();
-            return bookResult.move;
+            int[] bmv = bookResult.move;
+            // 验证走法合法性：起点有棋子且属于当前走棋方
+            chess.Piece movingPiece = board.getPiece(bmv[0], bmv[1]);
+            boolean valid = movingPiece != null && movingPiece.isRed == aiIsRed
+                    && bmv[2] >= 0 && bmv[2] <= 9 && bmv[3] >= 0 && bmv[3] <= 8;
+            if (valid) {
+                stats.source = bookResult.fromCloud ? MoveSource.CLOUD_BOOK : MoveSource.LOCAL_BOOK;
+                stats.elapsedMs = System.currentTimeMillis() - startTime;
+                stats.bestMove = bmv;
+                notifyStats();
+                return bmv;
+            }
+            // 开局库走法非法，降级到AI搜索
         }
 
         // 2. 清历史/杀手表（置换表跨步保留，复用 TT 价值）

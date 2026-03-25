@@ -59,7 +59,8 @@ public class ChessPanel extends JPanel {
     // ---- 右侧组件 ----
     private JLabel redTimeLabel, blackTimeLabel;
     private JLabel redSideLabel, blackSideLabel;
-    private JTextArea notationArea;
+    private javax.swing.JTable notationTable;
+    private javax.swing.table.DefaultTableModel notationModel;
     private JLabel statusLabel;
     private JLabel sourceLabel;  // 着法来源（云库/开局库/AI搜索+统计）
     private JLabel mateLabel;    // 绝杀提示（"X步绝杀" 或 空）
@@ -410,15 +411,37 @@ public class ChessPanel extends JPanel {
 
         // ── 中部：棋谱（上）+ AI预测（下），用 JSplitPane 可拖分 ──
 
-        // 棋谱：支持水平+垂直滚动
-        notationArea = new JTextArea();
-        notationArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        notationArea.setEditable(false);
-        notationArea.setBackground(new Color(0xFFFAF0));
-        notationArea.setLineWrap(false);  // 不折行，两步一行，紧凑多列
-        JScrollPane scroll = new JScrollPane(notationArea,
+        // 棋谱：JTable 多列表格，每行一手棋（序号、红方走法、黑方走法）
+        notationModel = new javax.swing.table.DefaultTableModel(
+                new Object[]{"序", "红方", "黑方"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        notationTable = new javax.swing.JTable(notationModel);
+        notationTable.setFont(new Font("宋体", Font.PLAIN, 12));
+        notationTable.setRowHeight(20);
+        notationTable.setBackground(new Color(0xFFFAF0));
+        notationTable.setGridColor(new Color(0xDDC080));
+        notationTable.setShowGrid(true);
+        notationTable.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        notationTable.getTableHeader().setFont(new Font("宋体", Font.BOLD, 12));
+        notationTable.getTableHeader().setBackground(new Color(0xF0D080));
+        notationTable.getTableHeader().setReorderingAllowed(false);
+        notationTable.getTableHeader().setResizingAllowed(true);
+        // 列宽：序号窄，走法均分
+        notationTable.getColumnModel().getColumn(0).setPreferredWidth(36);
+        notationTable.getColumnModel().getColumn(0).setMaxWidth(48);
+        notationTable.getColumnModel().getColumn(1).setPreferredWidth(80);
+        notationTable.getColumnModel().getColumn(2).setPreferredWidth(80);
+        // 居中对齐
+        javax.swing.table.DefaultTableCellRenderer center = new javax.swing.table.DefaultTableCellRenderer();
+        center.setHorizontalAlignment(SwingConstants.CENTER);
+        notationTable.getColumnModel().getColumn(0).setCellRenderer(center);
+        notationTable.getColumnModel().getColumn(1).setCellRenderer(center);
+        notationTable.getColumnModel().getColumn(2).setCellRenderer(center);
+
+        JScrollPane scroll = new JScrollPane(notationTable,
                 JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
-                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(new Color(0xC8A060)), "棋谱",
                 TitledBorder.CENTER, TitledBorder.TOP,
@@ -767,6 +790,17 @@ public class ChessPanel extends JPanel {
         if (externalEngine != null && externalEngine.isReady()) {
             // ── 外部引擎路径：先查开局库，命中则直接走棋，跳过引擎 ──
             OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(gs.board, gs.redTurn);
+            if (bookResult != null) {
+                final int[] bmv = bookResult.move;
+                // 验证：起点有棋子且属于当前走棋方，终点在棋盘内
+                Piece movingPiece = gs.board.getPiece(bmv[0], bmv[1]);
+                boolean valid = movingPiece != null && movingPiece.isRed == gs.redTurn
+                        && bmv[2] >= 0 && bmv[2] <= 9 && bmv[3] >= 0 && bmv[3] <= 8;
+                if (!valid) {
+                    // 开局库走法非法，降级到引擎
+                    bookResult = null;
+                }
+            }
             if (bookResult != null) {
                 final int[] bmv = bookResult.move;
                 final boolean fromCloud = bookResult.fromCloud;
@@ -1568,32 +1602,18 @@ public class ChessPanel extends JPanel {
 
     // ===================== 棋谱 =====================
     private void updateNotation() {
-        StringBuilder sb = new StringBuilder();
+        notationModel.setRowCount(0);
         int size = gs.notations.size();
-        // 真正多列：每行显示两手棋（4步）
-        // 格式：" N. 红方走法 黑方走法   N+1. 红方走法 黑方走法"
-        // 每手棋占固定宽度（序号3+点1+空1+红7+空1+黑7 = 20字符），两手之间留3空格
-        for (int i = 0; i < size; i += 4) {
-            // 第一手（本行左列）
-            int move1 = i / 2 + 1;
-            String red1  = i   < size ? gs.notations.get(i)   : "";
-            String blk1  = i+1 < size ? gs.notations.get(i+1) : "";
-            String col1  = String.format("%3d.%-7s %-7s", move1, red1, blk1);
-
-            // 第二手（本行右列），可能不存在
-            if (i + 2 < size) {
-                int move2 = i / 2 + 2;
-                String red2 = i+2 < size ? gs.notations.get(i+2) : "";
-                String blk2 = i+3 < size ? gs.notations.get(i+3) : "";
-                sb.append(col1).append("   ")
-                  .append(String.format("%3d.%-7s %-7s", move2, red2, blk2));
-            } else {
-                sb.append(col1);
-            }
-            sb.append('\n');
+        for (int i = 0; i < size; i += 2) {
+            String red = gs.notations.get(i);
+            String blk = (i + 1 < size) ? gs.notations.get(i + 1) : "";
+            notationModel.addRow(new Object[]{i / 2 + 1, red, blk});
         }
-        notationArea.setText(sb.toString());
-        notationArea.setCaretPosition(notationArea.getDocument().getLength());
+        // 自动滚动到最新一行
+        if (notationModel.getRowCount() > 0) {
+            int last = notationModel.getRowCount() - 1;
+            notationTable.scrollRectToVisible(notationTable.getCellRect(last, 0, true));
+        }
     }
 
     private void setStatus(String msg, boolean isRed) {
