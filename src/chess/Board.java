@@ -1,0 +1,276 @@
+package chess;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class Board {
+    public Piece[][] grid = new Piece[10][9];
+
+    public Board() { initBoard(); }
+
+    public void initBoard() {
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 9; c++) grid[r][c] = null;
+
+        // 黑方
+        grid[0][0]=new Piece(Piece.Type.ROOK,false); grid[0][1]=new Piece(Piece.Type.HORSE,false);
+        grid[0][2]=new Piece(Piece.Type.ELEPHANT,false); grid[0][3]=new Piece(Piece.Type.ADVISOR,false);
+        grid[0][4]=new Piece(Piece.Type.KING,false); grid[0][5]=new Piece(Piece.Type.ADVISOR,false);
+        grid[0][6]=new Piece(Piece.Type.ELEPHANT,false); grid[0][7]=new Piece(Piece.Type.HORSE,false);
+        grid[0][8]=new Piece(Piece.Type.ROOK,false);
+        grid[2][1]=new Piece(Piece.Type.CANNON,false); grid[2][7]=new Piece(Piece.Type.CANNON,false);
+        grid[3][0]=new Piece(Piece.Type.PAWN,false); grid[3][2]=new Piece(Piece.Type.PAWN,false);
+        grid[3][4]=new Piece(Piece.Type.PAWN,false); grid[3][6]=new Piece(Piece.Type.PAWN,false);
+        grid[3][8]=new Piece(Piece.Type.PAWN,false);
+        // 红方
+        grid[9][0]=new Piece(Piece.Type.ROOK,true); grid[9][1]=new Piece(Piece.Type.HORSE,true);
+        grid[9][2]=new Piece(Piece.Type.ELEPHANT,true); grid[9][3]=new Piece(Piece.Type.ADVISOR,true);
+        grid[9][4]=new Piece(Piece.Type.KING,true); grid[9][5]=new Piece(Piece.Type.ADVISOR,true);
+        grid[9][6]=new Piece(Piece.Type.ELEPHANT,true); grid[9][7]=new Piece(Piece.Type.HORSE,true);
+        grid[9][8]=new Piece(Piece.Type.ROOK,true);
+        grid[7][1]=new Piece(Piece.Type.CANNON,true); grid[7][7]=new Piece(Piece.Type.CANNON,true);
+        grid[6][0]=new Piece(Piece.Type.PAWN,true); grid[6][2]=new Piece(Piece.Type.PAWN,true);
+        grid[6][4]=new Piece(Piece.Type.PAWN,true); grid[6][6]=new Piece(Piece.Type.PAWN,true);
+        grid[6][8]=new Piece(Piece.Type.PAWN,true);
+    }
+
+    public Piece getPiece(int r, int c) {
+        return inBounds(r,c) ? grid[r][c] : null;
+    }
+
+    public boolean inBounds(int r, int c) {
+        return r>=0&&r<10&&c>=0&&c<9;
+    }
+
+    public Piece move(int fr, int fc, int tr, int tc) {
+        Piece cap = grid[tr][tc];
+        grid[tr][tc] = grid[fr][fc];
+        grid[fr][fc] = null;
+        return cap;
+    }
+
+    public void undoMove(int fr, int fc, int tr, int tc, Piece cap) {
+        grid[fr][fc] = grid[tr][tc];
+        grid[tr][tc] = cap;
+    }
+
+    /** 深拷贝棋盘 */
+    public Piece[][] copyGrid() {
+        Piece[][] g = new Piece[10][9];
+        for (int r=0;r<10;r++)
+            for (int c=0;c<9;c++)
+                g[r][c] = grid[r][c]==null ? null : grid[r][c].copy();
+        return g;
+    }
+
+    public List<int[]> getLegalMoves(int r, int c) {
+        Piece p = grid[r][c];
+        if (p==null) return new ArrayList<>();
+        List<int[]> raw = getRawMoves(r,c);
+        List<int[]> legal = new ArrayList<>();
+        for (int[] m : raw) {
+            Piece cap = move(r,c,m[0],m[1]);
+            if (!isInCheck(p.isRed)) legal.add(m);
+            undoMove(r,c,m[0],m[1],cap);
+        }
+        return legal;
+    }
+
+    public List<int[]> getRawMoves(int r, int c) {
+        Piece p = grid[r][c];
+        if (p==null) return new ArrayList<>();
+        switch(p.type){
+            case ROOK: return rookMoves(r,c,p.isRed);
+            case HORSE: return horseMoves(r,c,p.isRed);
+            case ELEPHANT: return elephantMoves(r,c,p.isRed);
+            case ADVISOR: return advisorMoves(r,c,p.isRed);
+            case KING: return kingMoves(r,c,p.isRed);
+            case CANNON: return cannonMoves(r,c,p.isRed);
+            case PAWN: return pawnMoves(r,c,p.isRed);
+        }
+        return new ArrayList<>();
+    }
+
+    private List<int[]> rookMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        for(int[]d:new int[][]{{1,0},{-1,0},{0,1},{0,-1}}){
+            int nr=r+d[0],nc=c+d[1];
+            while(inBounds(nr,nc)){
+                if(grid[nr][nc]==null) m.add(new int[]{nr,nc});
+                else{ if(grid[nr][nc].isRed!=red) m.add(new int[]{nr,nc}); break; }
+                nr+=d[0];nc+=d[1];
+            }
+        }
+        return m;
+    }
+
+    private List<int[]> horseMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        int[][]steps={{-2,-1},{-2,1},{2,-1},{2,1},{-1,-2},{-1,2},{1,-2},{1,2}};
+        int[][]legs= {{-1,0},{-1,0},{1,0},{1,0},{0,-1},{0,1},{0,-1},{0,1}};
+        for(int i=0;i<8;i++){
+            int nr=r+steps[i][0],nc=c+steps[i][1];
+            int lr=r+legs[i][0],lc=c+legs[i][1];
+            if(inBounds(nr,nc)&&grid[lr][lc]==null)
+                if(grid[nr][nc]==null||grid[nr][nc].isRed!=red) m.add(new int[]{nr,nc});
+        }
+        return m;
+    }
+
+    private List<int[]> elephantMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        int[][]s={{-2,-2},{-2,2},{2,-2},{2,2}},e={{-1,-1},{-1,1},{1,-1},{1,1}};
+        for(int i=0;i<4;i++){
+            int nr=r+s[i][0],nc=c+s[i][1];
+            if(!inBounds(nr,nc)) continue;
+            if(red&&nr<5) continue; if(!red&&nr>4) continue;
+            if(grid[r+e[i][0]][c+e[i][1]]!=null) continue;
+            if(grid[nr][nc]==null||grid[nr][nc].isRed!=red) m.add(new int[]{nr,nc});
+        }
+        return m;
+    }
+
+    private List<int[]> advisorMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        for(int[]s:new int[][]{{-1,-1},{-1,1},{1,-1},{1,1}}){
+            int nr=r+s[0],nc=c+s[1];
+            if(!inBounds(nr,nc)||nc<3||nc>5) continue;
+            if(red&&nr<7) continue; if(!red&&nr>2) continue;
+            if(grid[nr][nc]==null||grid[nr][nc].isRed!=red) m.add(new int[]{nr,nc});
+        }
+        return m;
+    }
+
+    private List<int[]> kingMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        for(int[]s:new int[][]{{-1,0},{1,0},{0,-1},{0,1}}){
+            int nr=r+s[0],nc=c+s[1];
+            if(!inBounds(nr,nc)||nc<3||nc>5) continue;
+            if(red&&nr<7) continue; if(!red&&nr>2) continue;
+            if(grid[nr][nc]==null||grid[nr][nc].isRed!=red) m.add(new int[]{nr,nc});
+        }
+        return m;
+    }
+
+    private List<int[]> cannonMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        for(int[]d:new int[][]{{1,0},{-1,0},{0,1},{0,-1}}){
+            int nr=r+d[0],nc=c+d[1]; boolean platform=false;
+            while(inBounds(nr,nc)){
+                if(!platform){
+                    if(grid[nr][nc]==null) m.add(new int[]{nr,nc});
+                    else platform=true;
+                } else {
+                    if(grid[nr][nc]!=null){ if(grid[nr][nc].isRed!=red) m.add(new int[]{nr,nc}); break; }
+                }
+                nr+=d[0];nc+=d[1];
+            }
+        }
+        return m;
+    }
+
+    private List<int[]> pawnMoves(int r,int c,boolean red){
+        List<int[]> m=new ArrayList<>();
+        if(red){
+            int nr=r-1;
+            if(inBounds(nr,c)&&(grid[nr][c]==null||!grid[nr][c].isRed)) m.add(new int[]{nr,c});
+            if(r<5){
+                if(inBounds(r,c-1)&&(grid[r][c-1]==null||!grid[r][c-1].isRed)) m.add(new int[]{r,c-1});
+                if(inBounds(r,c+1)&&(grid[r][c+1]==null||!grid[r][c+1].isRed)) m.add(new int[]{r,c+1});
+            }
+        } else {
+            int nr=r+1;
+            if(inBounds(nr,c)&&(grid[nr][c]==null||grid[nr][c].isRed)) m.add(new int[]{nr,c});
+            if(r>=5){
+                if(inBounds(r,c-1)&&(grid[r][c-1]==null||grid[r][c-1].isRed)) m.add(new int[]{r,c-1});
+                if(inBounds(r,c+1)&&(grid[r][c+1]==null||grid[r][c+1].isRed)) m.add(new int[]{r,c+1});
+            }
+        }
+        return m;
+    }
+
+    public boolean isInCheck(boolean red){
+        int kr=-1,kc=-1;
+        for(int r=0;r<10;r++) for(int c=0;c<9;c++)
+            if(grid[r][c]!=null&&grid[r][c].type==Piece.Type.KING&&grid[r][c].isRed==red){kr=r;kc=c;}
+        if(kr==-1) return true;
+        for(int r=0;r<10;r++) for(int c=0;c<9;c++){
+            Piece p=grid[r][c];
+            if(p!=null&&p.isRed!=red)
+                for(int[]mv:getRawMoves(r,c)) if(mv[0]==kr&&mv[1]==kc) return true;
+        }
+        // 飞将
+        for(int r=0;r<10;r++){
+            if(r==kr) continue;
+            if(grid[r][kc]!=null&&grid[r][kc].type==Piece.Type.KING&&grid[r][kc].isRed!=red){
+                boolean blocked=false;
+                for(int i=Math.min(kr,r)+1;i<Math.max(kr,r);i++) if(grid[i][kc]!=null){blocked=true;break;}
+                if(!blocked) return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean hasLegalMoves(boolean red){
+        for(int r=0;r<10;r++) for(int c=0;c<9;c++)
+            if(grid[r][c]!=null&&grid[r][c].isRed==red&&!getLegalMoves(r,c).isEmpty()) return true;
+        return false;
+    }
+
+    /** 生成简单FEN字符串 */
+    public String toFEN(boolean redTurn) {
+        StringBuilder sb = new StringBuilder();
+        for (int r = 0; r < 10; r++) {
+            int empty = 0;
+            for (int c = 0; c < 9; c++) {
+                Piece p = grid[r][c];
+                if (p == null) { empty++; }
+                else {
+                    if (empty > 0) { sb.append(empty); empty = 0; }
+                    sb.append(pieceToFENChar(p));
+                }
+            }
+            if (empty > 0) sb.append(empty);
+            if (r < 9) sb.append('/');
+        }
+        sb.append(redTurn ? " r" : " b");
+        return sb.toString();
+    }
+
+    private char pieceToFENChar(Piece p) {
+        char c;
+        switch(p.type){
+            case KING:c='k';break; case ADVISOR:c='a';break; case ELEPHANT:c='e';break;
+            case HORSE:c='h';break; case ROOK:c='r';break; case CANNON:c='c';break;
+            default:c='p';
+        }
+        return p.isRed ? Character.toUpperCase(c) : c;
+    }
+
+    /** 从FEN恢复棋盘 */
+    public boolean fromFEN(String fen) {
+        try {
+            String[] parts = fen.trim().split(" ");
+            String[] rows = parts[0].split("/");
+            for(int r=0;r<10;r++) for(int c=0;c<9;c++) grid[r][c]=null;
+            for (int r = 0; r < 10; r++) {
+                int c = 0;
+                for (char ch : rows[r].toCharArray()) {
+                    if (Character.isDigit(ch)) { c += ch-'0'; }
+                    else {
+                        boolean red = Character.isUpperCase(ch);
+                        Piece.Type t;
+                        switch(Character.toLowerCase(ch)){
+                            case 'k':t=Piece.Type.KING;break; case 'a':t=Piece.Type.ADVISOR;break;
+                            case 'e':t=Piece.Type.ELEPHANT;break; case 'h':t=Piece.Type.HORSE;break;
+                            case 'r':t=Piece.Type.ROOK;break; case 'c':t=Piece.Type.CANNON;break;
+                            default:t=Piece.Type.PAWN;
+                        }
+                        grid[r][c++] = new Piece(t, red);
+                    }
+                }
+            }
+            return parts.length > 1 && parts[1].equals("r");
+        } catch(Exception e){ return true; }
+    }
+}

@@ -1,0 +1,19 @@
+# 编译输出
+out/
+target/
+
+# 历史版本jar（只保留源码，不提交二进制）
+*.jar
+
+# IDE配置
+.idea/
+*.iml
+
+# Maven
+*.class
+
+# macOS
+.DS_Store
+
+# 临时文件
+sources.txt
