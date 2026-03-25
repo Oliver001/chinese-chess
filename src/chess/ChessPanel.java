@@ -59,6 +59,7 @@ public class ChessPanel extends JPanel {
     private JLabel advantageLabel;  // 优势评分标签（"红优200分"/"均势"/"黑优150分"）
     private JProgressBar advantageBar; // 视觉优势条
     private JPanel boardPanel;
+    private JPanel sidePanel;          // 右侧信息面板（动态宽度）
     private JPanel timePanelContainer; // 时间面板容器（翻转时重排）
     private Timer clockTimer;
     private Timer animTimer;   // 思考动画定时器（成员变量，避免泄漏）
@@ -93,7 +94,22 @@ public class ChessPanel extends JPanel {
         setLayout(new BorderLayout());
         boardPanel = createBoardPanel();
         add(boardPanel, BorderLayout.CENTER);
-        add(createSidePanel(), BorderLayout.EAST);
+        sidePanel = createSidePanel();
+        add(sidePanel, BorderLayout.EAST);
+
+        // 监听整体面板尺寸变化，动态调整右侧栏宽度（约占总宽 24%，最小 188px）
+        addComponentListener(new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent e) {
+                int totalW = getWidth();
+                if (totalW <= 0) return;
+                int newSideW = Math.max(188, (int)(totalW * 0.24));
+                Dimension cur = sidePanel.getPreferredSize();
+                if (cur.width != newSideW) {
+                    sidePanel.setPreferredSize(new Dimension(newSideW, cur.height));
+                    revalidate();
+                }
+            }
+        });
 
         // 更新侧边栏标签
         if (gs.humanIsRed) {
@@ -212,6 +228,7 @@ public class ChessPanel extends JPanel {
     private JPanel createSidePanel() {
         JPanel side = new JPanel(new BorderLayout(4, 4));
         side.setPreferredSize(new Dimension(SIDE_W, BOARD_H));
+        side.setMinimumSize(new Dimension(188, 500));
         side.setBackground(new Color(0xF5E6C8));
         side.setBorder(new EmptyBorder(8, 6, 8, 8));
 
@@ -249,7 +266,7 @@ public class ChessPanel extends JPanel {
         advantageBar = new JProgressBar(0, 200);
         advantageBar.setValue(100); // 居中=均势
         advantageBar.setStringPainted(false);
-        advantageBar.setPreferredSize(new Dimension(SIDE_W - 20, 12));
+        advantageBar.setPreferredSize(new Dimension(SIDE_W - 20, 14));
         advantageBar.setBackground(new Color(0x222222)); // 黑方
         advantageBar.setForeground(new Color(0xCC2222)); // 红方
         advantageBar.setBorder(BorderFactory.createLineBorder(new Color(0xAA8844), 1));
@@ -306,7 +323,6 @@ public class ChessPanel extends JPanel {
         bestMoveArea.setWrapStyleWord(false);
         bestMoveArea.setText("AI尚未走棋");
         JScrollPane pvScroll = new JScrollPane(bestMoveArea);
-        pvScroll.setPreferredSize(new Dimension(SIDE_W - 14, 105));
         pvScroll.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(new Color(0xC8A060)), "AI预测走法",
                 TitledBorder.CENTER, TitledBorder.TOP,

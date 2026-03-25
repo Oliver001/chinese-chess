@@ -37,6 +37,7 @@ public class ReviewPanel extends JPanel {
 
     // ---- UI ----
     private JPanel boardPanel;
+    private JPanel rightPanel;         // 右侧信息面板（动态宽度）
     private JList<String> moveList;
     private DefaultListModel<String> moveListModel;
     private JLabel stepLabel;
@@ -87,12 +88,12 @@ public class ReviewPanel extends JPanel {
         boardPanel.setBackground(new Color(0xDEB887));
         add(boardPanel, BorderLayout.CENTER);
 
-        // 右：信息面板（固定宽度）
+        // 右：信息面板（宽度随窗口等比扩展）
         JPanel right = new JPanel(new BorderLayout(0, 6));
         right.setPreferredSize(new Dimension(SIDE_W, BOARD_H));
         right.setMinimumSize(new Dimension(SIDE_W, 400));
-        right.setMaximumSize(new Dimension(SIDE_W, Integer.MAX_VALUE));
         right.setOpaque(false);
+        rightPanel = right;
 
         // 顶部：对局信息
         JPanel info = new JPanel(new GridLayout(3,1,2,2));
@@ -142,6 +143,7 @@ public class ReviewPanel extends JPanel {
 
         scoreChart = new ScoreChart();
         scoreChart.setPreferredSize(new Dimension(SIDE_W, CHART_H));
+        scoreChart.setMinimumSize(new Dimension(100, CHART_H));
         scoreChart.setBorder(BorderFactory.createTitledBorder(
             BorderFactory.createLineBorder(new Color(0xC8A060)), "优势曲线",
             TitledBorder.CENTER, TitledBorder.TOP,
@@ -166,6 +168,20 @@ public class ReviewPanel extends JPanel {
 
         right.add(bottom, BorderLayout.SOUTH);
         add(right, BorderLayout.EAST);
+
+        // 监听整体面板尺寸变化，动态调整右侧栏宽度（约占总宽 26%，最小 220px）
+        addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent e) {
+                int totalW = getWidth();
+                if (totalW <= 0) return;
+                int newSideW = Math.max(SIDE_W, (int)(totalW * 0.26));
+                Dimension cur = rightPanel.getPreferredSize();
+                if (cur.width != newSideW) {
+                    rightPanel.setPreferredSize(new Dimension(newSideW, cur.height));
+                    revalidate();
+                }
+            }
+        });
     }
 
     private JButton makeNavBtn(String text, ActionListener al) {
