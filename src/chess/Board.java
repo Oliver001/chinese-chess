@@ -294,9 +294,14 @@ public class Board {
     private char pieceToFENChar(Piece p) {
         char c;
         switch(p.type){
-            case KING:c='k';break; case ADVISOR:c='a';break; case ELEPHANT:c='e';break;
-            case HORSE:c='h';break; case ROOK:c='r';break; case CANNON:c='c';break;
-            default:c='p';
+            // 皮卡鱼/UCI-Cyclone标准：马=n(knight) 象=b(bishop) 士=a 车=r 炮=c 将/帅=k 兵/卒=p
+            case KING:     c = 'k'; break;
+            case ADVISOR:  c = 'a'; break;
+            case ELEPHANT: c = 'b'; break;  // bishop，不是e
+            case HORSE:    c = 'n'; break;  // knight，不是h
+            case ROOK:     c = 'r'; break;
+            case CANNON:   c = 'c'; break;
+            default:       c = 'p'; break;
         }
         return p.isRed ? Character.toUpperCase(c) : c;
     }
@@ -315,10 +320,15 @@ public class Board {
                         boolean red = Character.isUpperCase(ch);
                         Piece.Type t;
                         switch(Character.toLowerCase(ch)){
-                            case 'k':t=Piece.Type.KING;break; case 'a':t=Piece.Type.ADVISOR;break;
-                            case 'e':t=Piece.Type.ELEPHANT;break; case 'h':t=Piece.Type.HORSE;break;
-                            case 'r':t=Piece.Type.ROOK;break; case 'c':t=Piece.Type.CANNON;break;
-                            default:t=Piece.Type.PAWN;
+                            case 'k': t=Piece.Type.KING;     break;
+                            case 'a': t=Piece.Type.ADVISOR;  break;
+                            case 'b': t=Piece.Type.ELEPHANT; break; // UCI标准: bishop=象
+                            case 'e': t=Piece.Type.ELEPHANT; break; // 旧格式兼容
+                            case 'n': t=Piece.Type.HORSE;    break; // UCI标准: knight=马
+                            case 'h': t=Piece.Type.HORSE;    break; // 旧格式兼容
+                            case 'r': t=Piece.Type.ROOK;     break;
+                            case 'c': t=Piece.Type.CANNON;   break;
+                            default:  t=Piece.Type.PAWN;
                         }
                         grid[r][c++] = new Piece(t, red);
                     }
