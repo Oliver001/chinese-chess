@@ -412,10 +412,10 @@ public class ChessPanel extends JPanel {
 
         // 棋谱：支持水平+垂直滚动
         notationArea = new JTextArea();
-        notationArea.setFont(new Font("宋体", Font.PLAIN, 12));
+        notationArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
         notationArea.setEditable(false);
         notationArea.setBackground(new Color(0xFFFAF0));
-        notationArea.setLineWrap(false);  // 不折行，允许水平滚动
+        notationArea.setLineWrap(false);  // 不折行，两步一行，紧凑多列
         JScrollPane scroll = new JScrollPane(notationArea,
                 JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
@@ -540,13 +540,17 @@ public class ChessPanel extends JPanel {
         JMenuItem saveGameItem = new JMenuItem("保存棋局(Ctrl+W)");
         saveGameItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_W, InputEvent.CTRL_DOWN_MASK));
         saveGameItem.addActionListener(e -> {
-            if (gs.gameOver) {
-                setStatus("对局已结束，无需手动保存", true);
+            if (idleMode) {
+                setStatus("还没有开始对局", true);
                 return;
             }
-            gs.saveGame("进行中");
-            setStatus("棋局已保存，下次可继续", true);
-            JOptionPane.showMessageDialog(this, "棋局已保存！\n下次启动可通过[加载棋局]菜单继续对弈。",
+            String result = gs.gameOver ? "已结束" : "进行中";
+            gs.saveGame(result);
+            String saveDir = GameState.getSaveDir().toString();
+            setStatus("棋局已保存至 " + saveDir, true);
+            JOptionPane.showMessageDialog(this,
+                    "棋局已保存！\n保存目录：" + saveDir + "\n\n" +
+                    (gs.gameOver ? "下次可通过[加载棋局]进行复盘分析。" : "下次可通过[加载棋局]菜单继续对弈。"),
                     "保存成功", JOptionPane.INFORMATION_MESSAGE);
         });
 
@@ -602,9 +606,15 @@ public class ChessPanel extends JPanel {
         soundItem.setMnemonic('M');
         soundItem.addActionListener(e -> sound.setEnabled(soundItem.isSelected()));
 
+        // 开局库设置
+        JMenuItem bookItem = new JMenuItem("开局库设置(K)");
+        bookItem.setMnemonic('K');
+        bookItem.addActionListener(e -> showBookModeDialog());
+
         settingsMenu.add(engineMenuItem);
         settingsMenu.add(engineOptionsItem);
         settingsMenu.add(diffItem);
+        settingsMenu.add(bookItem);
         settingsMenu.add(soundItem);
 
         // ── 视图 ──
@@ -1255,46 +1265,95 @@ public class ChessPanel extends JPanel {
         boardPanel.repaint();
     }
 
-    // ===================== 加载棋局（继续对弈） =====================
+    // ===================== 加载棋局（继续对弈 / 复盘分析） =====================
     private void showLoadGameDialog() {
+        // 用文件选择器直接打开保存目录，棋手可选任意 .cgame 文件
+        java.io.File saveDir = GameState.getSaveDir().toFile();
+        if (!saveDir.exists()) {
+            JOptionPane.showMessageDialog(this,
+                "还没有保存过任何棋局。\n请先通过[保存棋局]菜单保存对局。",
+                "加载棋局", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        JFileChooser fc = new JFileChooser(saveDir);
+        fc.setDialogTitle("选择棋局文件（.cgame）");
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "象棋对局文件 (*.cgame)", "cgame"));
+        fc.setAcceptAllFileFilterUsed(false);
+
+        // 构建列表预览面板
         java.util.List<GameState.GameRecord> games = GameState.loadAllGames();
-        if (games.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "没有找到已保存的棋局。\n请先通过[保存棋局]菜单保存进行中的对局。",
-                    "加载棋局", JOptionPane.INFORMATION_MESSAGE);
+        if (!games.isEmpty()) {
+            // 右侧显示对局列表辅助选择
+            String[] labels = new String[games.size()];
+            for (int i = 0; i < games.size(); i++) {
+                GameState.GameRecord r = games.get(i);
+                labels[i] = r.toString();
+            }
+            JList<String> gameList = new JList<>(labels);
+            gameList.setFont(new Font("宋体", Font.PLAIN, 12));
+            gameList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            gameList.setSelectedIndex(0);
+            gameList.addListSelectionListener(e -> {
+                if (!e.getValueIsAdjusting() && gameList.getSelectedIndex() >= 0) {
+                    fc.setSelectedFile(games.get(gameList.getSelectedIndex()).file.toFile());
+                }
+            });
+            fc.setAccessory(new JScrollPane(gameList) {{
+                setPreferredSize(new Dimension(280, 200));
+                setBorder(BorderFactory.createTitledBorder("已保存对局"));
+            }});
+            fc.setSelectedFile(games.get(0).file.toFile());
+        }
+
+        int result = fc.showOpenDialog(this);
+        if (result != JFileChooser.APPROVE_OPTION) return;
+
+        java.io.File selectedFile = fc.getSelectedFile();
+        GameState.GameRecord sel = GameState.loadGame(selectedFile.toPath());
+        if (sel == null) {
+            JOptionPane.showMessageDialog(this, "棋局文件读取失败，请检查文件格式。",
+                    "加载失败", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
-        // 只显示"进行中"的棋局
-        java.util.List<GameState.GameRecord> inProgress = new java.util.ArrayList<>();
-        for (GameState.GameRecord r : games)
-            if (r.inProgress) inProgress.add(r);
-        if (inProgress.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "没有找到进行中的棋局。\n所有已保存的棋局已结束。",
-                    "加载棋局", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-
-        GameState.GameRecord[] arr = inProgress.toArray(new GameState.GameRecord[0]);
-        GameState.GameRecord sel = (GameState.GameRecord) JOptionPane.showInputDialog(
-                this,
-                "选择要继续的棋局：\n（日期  执棋方  状态）",
+        // 询问用户：继续对弈 还是 仅复盘分析
+        int mode = JOptionPane.showOptionDialog(this,
+                "<html><b>" + sel.date + "</b>  " + (sel.humanIsRed ? "执红" : "执黑")
+                + "  " + sel.result + "<br>共 " + sel.notations.size() + " 步<br><br>"
+                + "请选择加载方式：</html>",
                 "加载棋局",
-                JOptionPane.QUESTION_MESSAGE,
-                null, arr, arr[0]);
-        if (sel == null) return;
+                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null,
+                new String[]{"继续对弈", "查看棋谱(ReviewPanel)", "取消"},
+                "继续对弈");
+
+        if (mode == 2 || mode < 0) return;
+
+        if (mode == 1) {
+            // 用 ReviewPanel 打开复盘
+            ReviewPanel.showReviewDialogWithRecord(this, sel);
+            return;
+        }
+
+        // mode == 0：继续对弈
+        if (!sel.inProgress) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                    "此对局已结束（" + sel.result + "）。\n仍要从当前局面继续？",
+                    "对局已结束", JOptionPane.YES_NO_OPTION);
+            if (confirm != JOptionPane.YES_OPTION) return;
+        }
 
         // 停止当前AI
         if (aiThinking) {
             if (externalEngine != null) externalEngine.stopSearch();
-            // 内置AI没有强制停止接口，标记停止标志让搜索自然超时
             aiThinking = false;
         }
         if (animTimer != null) animTimer.stop();
 
         // 从FEN恢复局面
         if (sel.currentFen != null && !sel.currentFen.isEmpty()) {
-            boolean rt = gs.board.fromFEN(sel.currentFen);
-            // fromFEN返回的是走棋方(true=红)，但FEN自带 w/b 信息
+            gs.board.fromFEN(sel.currentFen);
             gs.redTurn = sel.redTurn;
         }
         gs.humanIsRed = sel.humanIsRed;
@@ -1308,6 +1367,13 @@ public class ChessPanel extends JPanel {
         gs.history.clear();
         gs.notations.clear();
         gs.notations.addAll(sel.notations);
+
+        // 恢复GameId便于覆盖保存
+        if (sel.file != null) {
+            String fname = sel.file.getFileName().toString();
+            if (fname.endsWith(".cgame"))
+                gs.gameId = fname.substring(0, fname.length() - 6);
+        }
 
         // 难度
         try { gs.difficulty = GameState.Difficulty.valueOf(sel.difficultyName); }
@@ -1333,6 +1399,7 @@ public class ChessPanel extends JPanel {
         mateLabel.setText(" ");
         mateLabel.setBackground(new Color(0xF5E6C8));
 
+        idleMode = false;
         updateNotation();
         updateTimeLabels();
         updateAdvantage(Evaluator.evaluate(gs.board));
@@ -1440,13 +1507,50 @@ public class ChessPanel extends JPanel {
         setStatus("难度已设为：" + opts[sel], true);
     }
 
+    private void showBookModeDialog() {
+        OpeningBook.BookMode[] modes = OpeningBook.BookMode.values();
+        JPanel p = new JPanel(new BorderLayout(8, 8));
+        p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        ButtonGroup bg = new ButtonGroup();
+        JPanel radioPanel = new JPanel(new GridLayout(modes.length, 1, 4, 6));
+        radioPanel.setOpaque(false);
+        JRadioButton[] btns = new JRadioButton[modes.length];
+        for (int i = 0; i < modes.length; i++) {
+            btns[i] = new JRadioButton("<html><b>" + modes[i].label + "</b><br>"
+                    + "<font size='2' color='#666666'>" + modes[i].desc + "</font></html>");
+            btns[i].setFont(new Font("宋体", Font.PLAIN, 12));
+            if (modes[i] == OpeningBook.currentMode) btns[i].setSelected(true);
+            bg.add(btns[i]);
+            radioPanel.add(btns[i]);
+        }
+        p.add(new JLabel("<html><b>开局库模式设置</b><br>"
+                + "<font size='2' color='#888'>本地库包含 100+ 主流开局变例</font></html>"),
+                BorderLayout.NORTH);
+        p.add(radioPanel, BorderLayout.CENTER);
+
+        int res = JOptionPane.showConfirmDialog(this, p, "开局库设置",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (res != JOptionPane.OK_OPTION) return;
+
+        for (int i = 0; i < modes.length; i++) {
+            if (btns[i].isSelected()) {
+                OpeningBook.currentMode = modes[i];
+                setStatus("开局库模式：" + modes[i].label, true);
+                break;
+            }
+        }
+    }
+
     // ===================== 棋谱 =====================
     private void updateNotation() {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < gs.notations.size(); i++) {
-            if (i % 2 == 0) sb.append(String.format("%2d. ", i/2+1));
-            sb.append(gs.notations.get(i));
-            if (i % 2 == 1) sb.append('\n'); else sb.append("  ");
+        int size = gs.notations.size();
+        // 多列格式：每行 "N. 红方走法  黑方走法"，固定宽度对齐
+        for (int i = 0; i < size; i += 2) {
+            sb.append(String.format("%3d. %-10s", i/2+1, gs.notations.get(i)));
+            if (i+1 < size) sb.append("  ").append(gs.notations.get(i+1));
+            sb.append('\n');
         }
         notationArea.setText(sb.toString());
         notationArea.setCaretPosition(notationArea.getDocument().getLength());

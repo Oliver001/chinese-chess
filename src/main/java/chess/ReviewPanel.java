@@ -548,7 +548,7 @@ public class ReviewPanel extends JPanel {
     }
 
     // =====================================================================
-    // 静态工厂：弹出打谱对话框
+    // 静态工厂：弹出打谱对话框（从历史列表选择）
     // =====================================================================
     public static void showReviewDialog(Component parent) {
         List<GameState.GameRecord> games = GameState.loadAllGames();
@@ -577,11 +577,17 @@ public class ReviewPanel extends JPanel {
         GameState.GameRecord selected = gameList.getSelectedValue();
         if (selected == null) return;
 
-        // 打开打谱窗口
-        JFrame frame = new JFrame("打谱 — " + selected.date);
+        showReviewDialogWithRecord(parent, selected);
+    }
+
+    /**
+     * 直接用指定 GameRecord 打开复盘窗口（无需再选择）
+     */
+    public static void showReviewDialogWithRecord(Component parent, GameState.GameRecord record) {
+        JFrame frame = new JFrame("打谱 — " + record.date + "  " + record.result);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.setResizable(true);
-        ReviewPanel panel = new ReviewPanel(selected);
+        ReviewPanel panel = new ReviewPanel(record);
         frame.add(panel);
         frame.pack();
         frame.setMinimumSize(new Dimension(700, 580));

@@ -20,6 +20,23 @@ import java.util.*;
  */
 public class OpeningBook {
 
+    // =====================================================================
+    // 开局库模式配置（可在运行时切换）
+    // =====================================================================
+    public enum BookMode {
+        CLOUD_AND_LOCAL("云库+本地库（推荐）", "优先查询 chessdb.cn 云库，失败时回退本地库"),
+        LOCAL_ONLY     ("仅本地库",            "只使用内置本地开局库，不联网"),
+        DISABLED       ("禁用开局库",          "不使用任何开局库，完全由AI搜索决策");
+
+        public final String label;
+        public final String desc;
+        BookMode(String l, String d) { this.label = l; this.desc = d; }
+        @Override public String toString() { return label; }
+    }
+
+    /** 当前开局库模式（全局，默认云库+本地） */
+    public static volatile BookMode currentMode = BookMode.CLOUD_AND_LOCAL;
+
     /** 在线查询超时（毫秒）*/
     private static final int ONLINE_TIMEOUT_MS = 3000;
 
@@ -53,49 +70,57 @@ public class OpeningBook {
 
     /**
      * 新接口：返回 LookupResult（包含走法和来源），null 表示无推荐
-     * 1. 尝试在线云库（queryall，按 rank+score 选出最优）
-     * 2. 失败/超时则回退本地开局库
+     * 根据 currentMode 决定查询策略：
+     * - CLOUD_AND_LOCAL：优先云库，失败回退本地库
+     * - LOCAL_ONLY：仅本地库
+     * - DISABLED：直接返回 null
      */
     public static LookupResult lookupWithSource(Board board, boolean isRed) {
-        // --- 在线查询 ---
-        try {
-            String fen = board.toFEN(isRed);
-            String fenEncoded = URLEncoder.encode(fen, "UTF-8");
-            // queryall 返回所有带评分走法，从中选最优 rank 且 score 已知的
-            String urlStr = API_URL + "?action=queryall&board=" + fenEncoded
-                          + "&learn=0&egtbmetric=dtm";
-            URL url = new URL(urlStr);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(ONLINE_TIMEOUT_MS);
-            conn.setReadTimeout(ONLINE_TIMEOUT_MS);
-            conn.setRequestProperty("User-Agent", "ChessJavaDemo/1.0");
+        if (currentMode == BookMode.DISABLED) return null;
 
-            int status = conn.getResponseCode();
-            if (status == 200) {
-                BufferedReader br = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream(), "UTF-8"));
-                String resp = br.readLine();
-                br.close();
-                conn.disconnect();
+        if (currentMode == BookMode.CLOUD_AND_LOCAL) {
+            // --- 在线查询 ---
+            try {
+                String fen = board.toFEN(isRed);
+                String fenEncoded = URLEncoder.encode(fen, "UTF-8");
+                String urlStr = API_URL + "?action=queryall&board=" + fenEncoded
+                              + "&learn=0&egtbmetric=dtm";
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(ONLINE_TIMEOUT_MS);
+                conn.setReadTimeout(ONLINE_TIMEOUT_MS);
+                conn.setRequestProperty("User-Agent", "ChessJavaDemo/1.0");
 
-                if (resp != null && !resp.startsWith("unknown") &&
-                    !resp.startsWith("invalid") && !resp.startsWith("nobestmove") &&
-                    !resp.startsWith("checkmate") && !resp.startsWith("stalemate")) {
+                int status = conn.getResponseCode();
+                if (status == 200) {
+                    BufferedReader br = new BufferedReader(
+                            new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    String resp = br.readLine();
+                    br.close();
+                    conn.disconnect();
 
-                    int[] mv = parseBestFromQueryAll(resp);
-                    if (mv != null) return new LookupResult(mv, true);
+                    if (resp != null && !resp.startsWith("unknown") &&
+                        !resp.startsWith("invalid") && !resp.startsWith("nobestmove") &&
+                        !resp.startsWith("checkmate") && !resp.startsWith("stalemate")) {
+
+                        int[] mv = parseBestFromQueryAll(resp);
+                        if (mv != null) return new LookupResult(mv, true);
+                    }
+                } else {
+                    conn.disconnect();
                 }
-            } else {
-                conn.disconnect();
+            } catch (Exception ignored) {
+                // 网络不可用或超时，静默回退到本地库
             }
-        } catch (Exception ignored) {
-            // 网络不可用或超时，静默回退到本地库
         }
 
         // --- 本地离线开局库兜底 ---
-        int[] mv = localLookup(board, isRed);
-        return mv != null ? new LookupResult(mv, false) : null;
+        if (currentMode != BookMode.DISABLED) {
+            int[] mv = localLookup(board, isRed);
+            return mv != null ? new LookupResult(mv, false) : null;
+        }
+        return null;
     }
 
     /**
@@ -160,15 +185,16 @@ public class OpeningBook {
     }
 
     /**
-     * UCCI 坐标 → {fromRow, fromCol, toRow, toCol}
-     * UCCI: 列 a(0)~i(8)，行 0(黑方底线)~9(红方底线)
-     * 我们的坐标系：row=0(黑方),row=9(红方) ——与 UCCI 行号一致
+     * UCCI/chessdb.cn 坐标 → {fromRow, fromCol, toRow, toCol}
+     * chessdb.cn 坐标系：列 a(0)~i(8)，行 0(黑方底线=row0) ~ 9(红方底线=row9)
+     * 我们的内部坐标系：row=0(黑方底线), row=9(红方底线) —— 与 UCCI 行号完全一致，直接映射
+     * 注意：皮卡鱼 UCI-Cyclone 坐标系不同（rank0=红方底线），转换在 iccsToInternal() 中处理
      */
     private static int[] ucciToRowCol(String ucci) {
-        int fc = ucci.charAt(0) - 'a';    // from col
-        int fr = 9 - (ucci.charAt(1) - '0'); // UCCI行0=红方底=row9
+        int fc = ucci.charAt(0) - 'a';
+        int fr = ucci.charAt(1) - '0';   // UCCI行0=黑方底线=内部row0，直接映射
         int tc = ucci.charAt(2) - 'a';
-        int tr = 9 - (ucci.charAt(3) - '0');
+        int tr = ucci.charAt(3) - '0';
         if (fc<0||fc>8||fr<0||fr>9||tc<0||tc>8||tr<0||tr>9) return null;
         return new int[]{fr, fc, tr, tc};
     }
@@ -550,6 +576,181 @@ public class OpeningBook {
                 mw(0,7,1,5, 35),
                 mw(0,1,2,2, 35),
                 mw(2,7,2,4, 30)
+            );
+        }
+
+        // ================================================================
+        // 五八炮（炮二平五 → 炮八平五，双炮攻势）
+        // 红：炮二平五 → 炮八平五 → 马二进三 → 车一平二 → ...
+        // ================================================================
+        Board wb1 = play(new Board(), mv(7,1,7,4), mv(0,7,1,5), mv(7,7,7,4));
+        if (wb1 != null) {
+            addW(wb1, false,
+                mw(0,1,2,2, 35),  // 马2进3（屏风马应五八炮）
+                mw(3,4,4,4, 30),  // 卒5进1
+                mw(2,7,2,5, 20),  // 炮8退3（退炮守中）
+                mw(0,0,0,2, 15)   // 车9平8
+            );
+            Board wb2 = play(cp(wb1), mv(0,1,2,2));
+            if (wb2 != null) {
+                addW(wb2, true,
+                    mw(9,1,7,2, 40),  // 马二进三
+                    mw(9,0,8,0, 30),  // 车一进一
+                    mw(6,2,5,2, 30)   // 兵三进一
+                );
+            }
+        }
+
+        // ================================================================
+        // 顺炮横车（炮二平五 → 炮8平5 → 车一平二 → 车9平8...）
+        // ================================================================
+        Board sp1 = play(new Board(), mv(7,1,7,4), mv(2,7,2,4));
+        if (sp1 != null) {
+            // 顺炮：红方接下来的变化
+            Board sp2 = play(cp(sp1), mv(9,0,9,1)); // 车一平二
+            if (sp2 != null) {
+                addW(sp2, false,
+                    mw(0,0,0,1, 40),  // 车9平8（顺炮直车对直车）
+                    mw(0,1,2,2, 30),  // 马2进3
+                    mw(0,7,1,5, 20),  // 马8进7
+                    mw(3,4,4,4, 10)   // 卒5进1
+                );
+                Board sp3 = play(cp(sp2), mv(0,0,0,1));
+                if (sp3 != null) {
+                    addW(sp3, true,
+                        mw(9,1,7,2, 40),   // 马二进三
+                        mw(7,7,7,4, 30),   // 炮八平五（鸳鸯炮）
+                        mw(6,2,5,2, 20),   // 兵三进一
+                        mw(9,7,7,6, 10)    // 马八进七
+                    );
+                }
+            }
+        }
+
+        // ================================================================
+        // 当头炮 vs 单提马（马8进9）变例
+        // ================================================================
+        Board dtm_v1 = play(new Board(), mv(7,1,7,4), mv(0,7,2,8));  // 马8进9
+        if (dtm_v1 != null) {
+            addW(dtm_v1, true,
+                mw(9,1,7,2, 45),  // 马二进三
+                mw(6,2,5,2, 30),  // 兵三进一
+                mw(9,7,7,6, 25)   // 马八进七
+            );
+        }
+
+        // ================================================================
+        // 三步虎（马二进三 → 炮二平五 → 车一平二）
+        // ================================================================
+        Board sbh = play(new Board(), mv(9,1,7,2), mv(0,7,1,5), mv(7,1,7,4));
+        if (sbh != null) {
+            addW(sbh, false,
+                mw(0,1,2,2, 35),  // 马2进3
+                mw(2,7,2,4, 30),  // 炮8平5
+                mw(3,4,4,4, 20),  // 卒5进1
+                mw(0,0,0,2, 15)   // 车9平8
+            );
+            Board sbh2 = play(cp(sbh), mv(0,1,2,2), mv(9,0,9,1)); // 车一平二
+            if (sbh2 != null) {
+                addW(sbh2, false,
+                    mw(0,0,0,1, 40),  // 车9平8
+                    mw(2,7,1,7, 30),  // 炮8进1
+                    mw(3,4,4,4, 20),  // 卒5进1
+                    mw(0,8,0,6, 10)   // 车1平3
+                );
+            }
+        }
+
+        // ================================================================
+        // 鸳鸯炮（双炮居中：炮二平五 → 炮八平五）强攻变化续
+        // 当黑方马2进3 → 马8进7 形成双马对峙时
+        // ================================================================
+        Board yyp = play(new Board(), mv(7,1,7,4), mv(0,1,2,2),
+                         mv(7,7,7,4), mv(0,7,1,5));
+        if (yyp != null) {
+            addW(yyp, true,
+                mw(9,1,7,2, 40),   // 马二进三
+                mw(9,7,7,6, 30),   // 马八进七
+                mw(9,0,8,0, 20),   // 车一进一
+                mw(6,4,5,4, 10)    // 兵五进一（中兵突破）
+            );
+        }
+
+        // ================================================================
+        // 士角炮（炮二平四）
+        // ================================================================
+        Board sjp = play(new Board(), mv(7,1,7,5));
+        if (sjp != null) {
+            addW(sjp, false,
+                mw(0,7,1,5, 40),
+                mw(0,1,2,2, 35),
+                mw(3,4,4,4, 25)
+            );
+        }
+
+        // ================================================================
+        // 当头炮 vs 屏风马 深化变例（续接前面的 c3 分支）
+        // 红：马八进七 → 兵三进一 → 车一平二 → ...
+        // ================================================================
+        Board pf1 = play(new Board(),
+            mv(7,1,7,4),   // 炮二平五
+            mv(0,7,1,5),   // 马8进7
+            mv(9,1,7,2),   // 马二进三
+            mv(0,1,2,2),   // 马2进3（屏风马）
+            mv(9,7,7,6),   // 马八进七
+            mv(0,0,0,2),   // 车9平8
+            mv(9,0,9,1));  // 车一平二
+        if (pf1 != null) {
+            addW(pf1, false,
+                mw(0,8,0,6, 40),  // 车1平3（互起横车）
+                mw(3,4,4,4, 30),  // 卒5进1
+                mw(2,7,1,7, 20),  // 炮8进1
+                mw(1,5,3,4, 10)   // 马7进6（马踩中卒）
+            );
+            Board pf2 = play(cp(pf1), mv(0,8,0,6));
+            if (pf2 != null) {
+                addW(pf2, true,
+                    mw(9,1,8,1, 40),  // 车二进一（巡河车）
+                    mw(6,2,5,2, 30),  // 兵三进一
+                    mw(7,7,7,6, 20),  // 炮八平三（三路炮）
+                    mw(9,8,9,7, 10)   // 车九进一
+                );
+            }
+        }
+
+        // ================================================================
+        // 马八进七起手（右马盘头）
+        // ================================================================
+        Board h2 = play(new Board(), mv(9,7,7,6));
+        if (h2 != null) {
+            addW(h2, false,
+                mw(0,7,1,5, 35),  // 马8进7
+                mw(0,1,2,2, 30),  // 马2进3
+                mw(2,7,2,4, 20),  // 炮8平5
+                mw(2,1,2,4, 15)   // 炮2平5
+            );
+            Board h2a = play(cp(h2), mv(0,7,1,5), mv(9,1,7,2));  // 马8进7 → 马二进三
+            if (h2a != null) {
+                addW(h2a, false,
+                    mw(0,1,2,2, 40),   // 马2进3（双马防御）
+                    mw(2,7,2,4, 30),   // 炮8平5
+                    mw(0,0,0,2, 20),   // 车9平8
+                    mw(3,4,4,4, 10)    // 卒5进1
+                );
+            }
+        }
+
+        // ================================================================
+        // 当头炮 → 马8进7 → 马二进三 → 车9平8 变例（车马炮协同）
+        // ================================================================
+        Board vm1 = play(new Board(),
+            mv(7,1,7,4), mv(0,7,1,5), mv(9,1,7,2), mv(0,0,0,1));
+        if (vm1 != null) {
+            addW(vm1, true,
+                mw(9,7,7,6, 40),  // 马八进七
+                mw(9,0,9,1, 30),  // 车一平二
+                mw(6,2,5,2, 20),  // 兵三进一
+                mw(7,7,7,4, 10)   // 炮八平五
             );
         }
     }
