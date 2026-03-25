@@ -765,7 +765,31 @@ public class ChessPanel extends JPanel {
 
         // ★ 判断使用外部引擎还是内置AI
         if (externalEngine != null && externalEngine.isReady()) {
-            // ── 外部引擎路径 ──
+            // ── 外部引擎路径：先查开局库，命中则直接走棋，跳过引擎 ──
+            OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(gs.board, gs.redTurn);
+            if (bookResult != null) {
+                final int[] bmv = bookResult.move;
+                final boolean fromCloud = bookResult.fromCloud;
+                animTimer.stop();
+                renderSnapshot = null;
+                boolean wasRed = gs.redTurn;
+                lastFR=bmv[0]; lastFC=bmv[1]; lastTR=bmv[2]; lastTC=bmv[3];
+                boolean isCapture = gs.board.getPiece(bmv[2], bmv[3]) != null;
+                Piece cap = gs.doMove(bmv[0], bmv[1], bmv[2], bmv[3]);
+                gs.applyIncrement(wasRed);
+                aiThinking = false;
+                if (isCapture) sound.playCapture(); else sound.playMove();
+                updateNotation();
+                updateAdvantage(Evaluator.evaluate(gs.board));
+                sourceLabel.setText("<html><center>" + (fromCloud ? "☁ 云库" : "📖 本地开局库") + "</center></html>");
+                mateLabel.setText(" ");
+                mateLabel.setBackground(new Color(0xF5E6C8));
+                bestMoveArea.setText("（开局库走法）");
+                checkGameOver(cap);
+                boardPanel.repaint();
+                return;
+            }
+
             setStatus("外部引擎思考中... [" + externalEngine.getName() + "]", false);
             sourceLabel.setText("<html><center>🔌 " + externalEngine.getName() + "</center></html>");
             mateLabel.setText(" ");
