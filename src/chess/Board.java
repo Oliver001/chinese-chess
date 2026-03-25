@@ -286,7 +286,8 @@ public class Board {
             if (empty > 0) sb.append(empty);
             if (r < 9) sb.append('/');
         }
-        sb.append(redTurn ? " r" : " b");
+        // 皮卡鱼(UCI-Cyclone)要求走棋方用 w/b，不能用 r/b
+        sb.append(redTurn ? " w" : " b");
         return sb.toString();
     }
 
@@ -323,7 +324,8 @@ public class Board {
                     }
                 }
             }
-            return parts.length > 1 && parts[1].equals("r");
+            // 兼容 UCI 标准的 "w"（红/白方）和旧格式 "r"
+            return parts.length > 1 && (parts[1].equals("r") || parts[1].equals("w"));
         } catch(Exception e){ return true; }
     }
 }

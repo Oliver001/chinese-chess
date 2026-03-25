@@ -17,11 +17,10 @@ import java.util.function.Consumer;
  *   GUI → 引擎: go movetime <毫秒>
  *   引擎 → GUI: bestmove <ICCS着法>
  *
- * ICCS坐标 ↔ 内部坐标转换：
- *   ICCS行：0=红方底线，9=黑方底线
- *   内部行：0=黑方底线，9=红方底线
- *   转换：ICCS行 = 9 - 内部row；内部row = 9 - ICCS行
- *   列：ICCS a-i 对应内部 0-8（相同）
+ * UCI-Cyclone坐标 ↔ 内部坐标（完全相同，无需翻转）：
+ *   行：0=黑方底线（棋盘顶部），9=红方底线（棋盘底部）—— 与内部坐标一致
+ *   列：a-i 对应内部列 0-8 —— 与内部坐标一致
+ *   示例：c3c4 → fromRow=3,fromCol=2, toRow=4,toCol=2
  */
 public class ExternalEngine {
 
@@ -192,16 +191,17 @@ public class ExternalEngine {
     // ──────────────────────────────────────────────
 
     /**
-     * ICCS坐标字符串 → 内部坐标 [fromRow, fromCol, toRow, toCol]
-     * ICCS行：0=红方底线；内部行：9=红方底线
+     * UCI-Cyclone坐标字符串 → 内部坐标 [fromRow, fromCol, toRow, toCol]
+     * 皮卡鱼行号与内部坐标完全一致（行0=黑方底线，行9=红方底线），无需翻转。
+     * 示例：c3c4 → [3, 2, 4, 2]
      */
     public static int[] iccsToInternal(String mv) {
         if (mv == null || mv.length() < 4) return null;
         try {
             int fromCol = mv.charAt(0) - 'a';
-            int fromRow = 9 - (mv.charAt(1) - '0');
+            int fromRow = mv.charAt(1) - '0';   // 直接使用，无需翻转
             int toCol   = mv.charAt(2) - 'a';
-            int toRow   = 9 - (mv.charAt(3) - '0');
+            int toRow   = mv.charAt(3) - '0';   // 直接使用，无需翻转
             return new int[]{fromRow, fromCol, toRow, toCol};
         } catch (Exception e) {
             return null;
@@ -209,11 +209,13 @@ public class ExternalEngine {
     }
 
     /**
-     * 内部坐标 → ICCS坐标字符串
+     * 内部坐标 → UCI-Cyclone坐标字符串
+     * 行号直接映射，无需翻转。
+     * 示例：[3, 2, 4, 2] → c3c4
      */
     public static String internalToIccs(int fr, int fc, int tr, int tc) {
-        return "" + (char)('a' + fc) + (char)('0' + (9 - fr))
-                  + (char)('a' + tc) + (char)('0' + (9 - tr));
+        return "" + (char)('a' + fc) + (char)('0' + fr)
+                  + (char)('a' + tc) + (char)('0' + tr);
     }
 
     public boolean isReady()         { return ready; }
