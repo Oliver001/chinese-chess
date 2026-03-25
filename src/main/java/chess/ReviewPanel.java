@@ -13,7 +13,7 @@ import java.util.List;
  */
 public class ReviewPanel extends JPanel {
 
-    // ---- 尺寸（与ChessPanel一致）----
+    // ---- 尺寸（初始默认值）----
     private static final int CELL    = 60;
     private static final int MARGIN  = 40;
     private static final int PIECE_R = 24;
@@ -21,6 +21,13 @@ public class ReviewPanel extends JPanel {
     private static final int BOARD_H = MARGIN * 2 + CELL * 9;
     private static final int SIDE_W  = 220;
     private static final int CHART_H = 130;
+
+    // ---- 动态尺寸（随面板大小实时计算）----
+    private int dynCell   = CELL;
+    private int dynMargin = MARGIN;
+    private int dynPieceR = PIECE_R;
+    private int dynOffX   = 0;
+    private int dynOffY   = 0;
 
     private GameState.GameRecord record;
     /** 当前显示到第几步（0=初始局面，1=第一步走完，…）*/
@@ -55,6 +62,21 @@ public class ReviewPanel extends JPanel {
         boardPanel = new JPanel() {
             @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
+                int pw = getWidth(), ph = getHeight();
+                int cellW = (pw - MARGIN * 2) / 8;
+                int cellH = (ph - MARGIN * 2) / 9;
+                int cell = Math.max(25, Math.min(cellW, cellH));
+                int margin = Math.max(16, (int)(cell * MARGIN / (double)CELL));
+                int boardPixW = margin * 2 + cell * 8;
+                int boardPixH = margin * 2 + cell * 9;
+                int offX = Math.max(0, (pw - boardPixW) / 2);
+                int offY = Math.max(0, (ph - boardPixH) / 2);
+                int pieceR = Math.max(10, (int)(cell * PIECE_R / (double)CELL));
+                dynCell   = cell;
+                dynMargin = margin;
+                dynPieceR = pieceR;
+                dynOffX   = offX;
+                dynOffY   = offY;
                 Graphics2D g2 = (Graphics2D)g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 drawBoard(g2);
@@ -65,9 +87,11 @@ public class ReviewPanel extends JPanel {
         boardPanel.setBackground(new Color(0xDEB887));
         add(boardPanel, BorderLayout.CENTER);
 
-        // 右：信息面板
+        // 右：信息面板（固定宽度）
         JPanel right = new JPanel(new BorderLayout(0, 6));
         right.setPreferredSize(new Dimension(SIDE_W, BOARD_H));
+        right.setMinimumSize(new Dimension(SIDE_W, 400));
+        right.setMaximumSize(new Dimension(SIDE_W, Integer.MAX_VALUE));
         right.setOpaque(false);
 
         // 顶部：对局信息
@@ -195,53 +219,58 @@ public class ReviewPanel extends JPanel {
     // 绘制棋盘
     // =====================================================================
     private void drawBoard(Graphics2D g) {
+        final int C = dynCell, M = dynMargin, R = dynPieceR, OX = dynOffX, OY = dynOffY;
         g.setColor(new Color(0x8B4513));
-        g.setStroke(new BasicStroke(1.5f));
+        g.setStroke(new BasicStroke(Math.max(1f, C / 44f)));
         for (int r=0;r<10;r++)
-            g.drawLine(MARGIN, MARGIN+r*CELL, MARGIN+8*CELL, MARGIN+r*CELL);
+            g.drawLine(OX+M, OY+M+r*C, OX+M+8*C, OY+M+r*C);
         for (int c=0;c<9;c++) {
-            if (c==0||c==8) g.drawLine(MARGIN+c*CELL, MARGIN, MARGIN+c*CELL, MARGIN+9*CELL);
+            if (c==0||c==8) g.drawLine(OX+M+c*C, OY+M, OX+M+c*C, OY+M+9*C);
             else {
-                g.drawLine(MARGIN+c*CELL, MARGIN,        MARGIN+c*CELL, MARGIN+4*CELL);
-                g.drawLine(MARGIN+c*CELL, MARGIN+5*CELL, MARGIN+c*CELL, MARGIN+9*CELL);
+                g.drawLine(OX+M+c*C, OY+M,        OX+M+c*C, OY+M+4*C);
+                g.drawLine(OX+M+c*C, OY+M+5*C, OX+M+c*C, OY+M+9*C);
             }
         }
-        g.drawLine(MARGIN+3*CELL,MARGIN,           MARGIN+5*CELL,MARGIN+2*CELL);
-        g.drawLine(MARGIN+5*CELL,MARGIN,           MARGIN+3*CELL,MARGIN+2*CELL);
-        g.drawLine(MARGIN+3*CELL,MARGIN+7*CELL,    MARGIN+5*CELL,MARGIN+9*CELL);
-        g.drawLine(MARGIN+5*CELL,MARGIN+7*CELL,    MARGIN+3*CELL,MARGIN+9*CELL);
-        g.setFont(new Font("宋体", Font.BOLD, 16));
+        g.drawLine(OX+M+3*C, OY+M,         OX+M+5*C, OY+M+2*C);
+        g.drawLine(OX+M+5*C, OY+M,         OX+M+3*C, OY+M+2*C);
+        g.drawLine(OX+M+3*C, OY+M+7*C,     OX+M+5*C, OY+M+9*C);
+        g.drawLine(OX+M+5*C, OY+M+7*C,     OX+M+3*C, OY+M+9*C);
+        int fontSize = Math.max(10, (int)(C * 16.0 / CELL));
+        g.setFont(new Font("宋体", Font.BOLD, fontSize));
         g.setColor(new Color(0x5C3317));
-        g.drawString("楚  河", MARGIN+CELL,   MARGIN+4*CELL+26);
-        g.drawString("汉  界", MARGIN+5*CELL, MARGIN+4*CELL+26);
+        g.drawString("楚  河", OX+M+C,   OY+M+4*C+(int)(C*0.42));
+        g.drawString("汉  界", OX+M+5*C, OY+M+4*C+(int)(C*0.42));
         // 高亮当前步的走法
         if (currentStep > 0) {
             int[] mv = record.moves.get(currentStep - 1);
             g.setColor(new Color(160, 210, 80, 100));
-            g.fillOval(MARGIN+mv[1]*CELL-PIECE_R, MARGIN+mv[0]*CELL-PIECE_R, PIECE_R*2, PIECE_R*2);
-            g.fillOval(MARGIN+mv[3]*CELL-PIECE_R, MARGIN+mv[2]*CELL-PIECE_R, PIECE_R*2, PIECE_R*2);
+            g.fillOval(OX+M+mv[1]*C-R, OY+M+mv[0]*C-R, R*2, R*2);
+            g.fillOval(OX+M+mv[3]*C-R, OY+M+mv[2]*C-R, R*2, R*2);
         }
     }
 
     private void drawPieces(Graphics2D g) {
+        final int C = dynCell, M = dynMargin, R = dynPieceR, OX = dynOffX, OY = dynOffY;
+        int fontSize = Math.max(10, (int)(R * 17.0 / PIECE_R));
         for (int r=0;r<10;r++) for (int c=0;c<9;c++) {
             Piece p = board.grid[r][c];
             if (p==null) continue;
-            int cx=MARGIN+c*CELL, cy=MARGIN+r*CELL;
+            int cx=OX+M+c*C, cy=OY+M+r*C;
             Color bg     = p.isRed ? new Color(0xFFD700) : new Color(0xF0DEB0);
             Color border = p.isRed ? new Color(0xB22222) : new Color(0x333333);
             Color text   = p.isRed ? new Color(0xB22222) : new Color(0x111111);
             g.setColor(new Color(0,0,0,40));
-            g.fillOval(cx-PIECE_R+2, cy-PIECE_R+3, PIECE_R*2, PIECE_R*2);
+            g.fillOval(cx-R+2, cy-R+3, R*2, R*2);
             g.setColor(bg);
-            g.fillOval(cx-PIECE_R,cy-PIECE_R,PIECE_R*2,PIECE_R*2);
+            g.fillOval(cx-R,cy-R,R*2,R*2);
             g.setColor(border);
-            g.setStroke(new BasicStroke(2f));
-            g.drawOval(cx-PIECE_R,cy-PIECE_R,PIECE_R*2,PIECE_R*2);
+            g.setStroke(new BasicStroke(Math.max(1.5f, R/12f)));
+            g.drawOval(cx-R,cy-R,R*2,R*2);
             g.setStroke(new BasicStroke(1f));
-            g.drawOval(cx-PIECE_R+3,cy-PIECE_R+3,(PIECE_R-3)*2,(PIECE_R-3)*2);
+            int inner = Math.max(2, R/8);
+            g.drawOval(cx-R+inner,cy-R+inner,(R-inner)*2,(R-inner)*2);
             g.setColor(text);
-            g.setFont(new Font("宋体", Font.BOLD, 17));
+            g.setFont(new Font("宋体", Font.BOLD, fontSize));
             FontMetrics fm = g.getFontMetrics();
             String txt = p.getDisplay();
             g.drawString(txt, cx-fm.stringWidth(txt)/2, cy+fm.getAscent()/2-1);
@@ -407,9 +436,11 @@ public class ReviewPanel extends JPanel {
         // 打开打谱窗口
         JFrame frame = new JFrame("打谱 — " + selected.date);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        frame.setResizable(true);
         ReviewPanel panel = new ReviewPanel(selected);
         frame.add(panel);
         frame.pack();
+        frame.setMinimumSize(new Dimension(700, 580));
         frame.setLocationRelativeTo(parent);
         frame.setVisible(true);
     }

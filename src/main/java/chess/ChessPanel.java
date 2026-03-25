@@ -8,13 +8,20 @@ import java.util.List;
 
 public class ChessPanel extends JPanel {
 
-    // ---- 尺寸 ----
+    // ---- 尺寸（默认/初始值，用于 preferredSize 和首次布局）----
     private static final int CELL    = 66;
     private static final int MARGIN  = 46;
     private static final int PIECE_R = 26;
     private static final int BOARD_W = MARGIN * 2 + CELL * 8;
     private static final int BOARD_H = MARGIN * 2 + CELL * 9;
     private static final int SIDE_W  = 188;
+
+    // ---- 动态尺寸（随面板大小实时计算，供绘制和点击使用）----
+    private volatile int dynCell   = CELL;
+    private volatile int dynMargin = MARGIN;
+    private volatile int dynPieceR = PIECE_R;
+    private volatile int dynOffX   = 0;
+    private volatile int dynOffY   = 0;
 
     // ---- 核心 ----
     private final GameState gs = new GameState();
@@ -132,18 +139,18 @@ public class ChessPanel extends JPanel {
     private int toScreenRow(int row) { return boardFlipped ? 9 - row : row; }
     /** 将屏幕行映射为逻辑行 */
     private int toLogicRow(int screenRow) { return boardFlipped ? 9 - screenRow : screenRow; }
-    /** 将屏幕像素y坐标转换为逻辑行 */
+    /** 将屏幕像素y坐标转换为逻辑行（使用动态边距/格距） */
     private int pixelToLogicRow(int py) {
-        int screenRow = Math.round((float)(py - MARGIN) / CELL);
+        int screenRow = Math.round((float)(py - dynOffY - dynMargin) / dynCell);
         return toLogicRow(screenRow);
     }
     /** 将逻辑列映射为屏幕列（翻转时左右互换） */
     private int toScreenCol(int col) { return boardFlipped ? 8 - col : col; }
     /** 将屏幕列映射为逻辑列 */
     private int toLogicCol(int screenCol) { return boardFlipped ? 8 - screenCol : screenCol; }
-    /** 将屏幕像素x坐标转换为逻辑列 */
+    /** 将屏幕像素x坐标转换为逻辑列（使用动态边距/格距） */
     private int pixelToLogicCol(int px) {
-        int screenCol = Math.round((float)(px - MARGIN) / CELL);
+        int screenCol = Math.round((float)(px - dynOffX - dynMargin) / dynCell);
         return toLogicCol(screenCol);
     }
 
@@ -153,6 +160,27 @@ public class ChessPanel extends JPanel {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
+                // 动态计算当前面板尺寸对应的格距/边距/棋子半径
+                int pw = getWidth(), ph = getHeight();
+                // 棋盘宽方向：9列×cell + 2×margin；高方向：10行×cell + 2×margin
+                // 让棋盘尽量充满面板，保持比例
+                int cellW = (pw - MARGIN * 2) / 8;  // 按宽计算
+                int cellH = (ph - MARGIN * 2) / 9;  // 按高计算
+                int cell = Math.max(30, Math.min(cellW, cellH)); // 取较小者保持比例
+                int margin = (int)(cell * MARGIN / (double)CELL);
+                margin = Math.max(20, margin);
+                // 重新居中：计算实际绘制区域的偏移
+                int boardPixW = margin * 2 + cell * 8;
+                int boardPixH = margin * 2 + cell * 9;
+                int offX = Math.max(0, (pw - boardPixW) / 2);
+                int offY = Math.max(0, (ph - boardPixH) / 2);
+                int pieceR = Math.max(12, (int)(cell * PIECE_R / (double)CELL));
+                dynCell   = cell;
+                dynMargin = margin;
+                dynPieceR = pieceR;
+                dynOffX   = offX;
+                dynOffY   = offY;
+
                 Graphics2D g2 = (Graphics2D) g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
@@ -856,132 +884,139 @@ public class ChessPanel extends JPanel {
 
     // ===================== 绘制 =====================
     private void drawBoard(Graphics2D g) {
+        final int C = dynCell, M = dynMargin, OX = dynOffX, OY = dynOffY;
         g.setColor(new Color(0x8B4513));
-        g.setStroke(new BasicStroke(1.5f));
+        g.setStroke(new BasicStroke(Math.max(1f, C / 44f)));
         for (int r=0;r<10;r++)
-            g.drawLine(MARGIN, MARGIN+r*CELL, MARGIN+8*CELL, MARGIN+r*CELL);
+            g.drawLine(OX+M, OY+M+r*C, OX+M+8*C, OY+M+r*C);
         for (int c=0;c<9;c++) {
-            if (c==0||c==8) g.drawLine(MARGIN+c*CELL, MARGIN, MARGIN+c*CELL, MARGIN+9*CELL);
+            if (c==0||c==8) g.drawLine(OX+M+c*C, OY+M, OX+M+c*C, OY+M+9*C);
             else {
-                g.drawLine(MARGIN+c*CELL, MARGIN,           MARGIN+c*CELL, MARGIN+4*CELL);
-                g.drawLine(MARGIN+c*CELL, MARGIN+5*CELL,    MARGIN+c*CELL, MARGIN+9*CELL);
+                g.drawLine(OX+M+c*C, OY+M,         OX+M+c*C, OY+M+4*C);
+                g.drawLine(OX+M+c*C, OY+M+5*C,     OX+M+c*C, OY+M+9*C);
             }
         }
-        g.drawLine(MARGIN+3*CELL, MARGIN,            MARGIN+5*CELL, MARGIN+2*CELL);
-        g.drawLine(MARGIN+5*CELL, MARGIN,            MARGIN+3*CELL, MARGIN+2*CELL);
-        g.drawLine(MARGIN+3*CELL, MARGIN+7*CELL,     MARGIN+5*CELL, MARGIN+9*CELL);
-        g.drawLine(MARGIN+5*CELL, MARGIN+7*CELL,     MARGIN+3*CELL, MARGIN+9*CELL);
-        g.setFont(new Font("宋体", Font.BOLD, 20));
+        g.drawLine(OX+M+3*C, OY+M,         OX+M+5*C, OY+M+2*C);
+        g.drawLine(OX+M+5*C, OY+M,         OX+M+3*C, OY+M+2*C);
+        g.drawLine(OX+M+3*C, OY+M+7*C,     OX+M+5*C, OY+M+9*C);
+        g.drawLine(OX+M+5*C, OY+M+7*C,     OX+M+3*C, OY+M+9*C);
+        int fontSize = Math.max(11, (int)(C * 20.0 / CELL));
+        g.setFont(new Font("宋体", Font.BOLD, fontSize));
         g.setColor(new Color(0x5C3317));
-        g.drawString("楚  河", MARGIN+CELL,   MARGIN+4*CELL+30);
-        g.drawString("汉  界", MARGIN+5*CELL, MARGIN+4*CELL+30);
+        g.drawString("楚  河", OX+M+C,   OY+M+4*C+(int)(C*0.45));
+        g.drawString("汉  界", OX+M+5*C, OY+M+4*C+(int)(C*0.45));
         // 标记点
         for (int[] pos : new int[][]{{2,1},{2,7},{7,1},{7,7},{3,0},{3,2},{3,4},{3,6},{3,8},{6,0},{6,2},{6,4},{6,6},{6,8}})
             drawMark(g, pos[0], pos[1]);
     }
 
     private void drawMark(Graphics2D g, int row, int col) {
-        int cx=MARGIN+col*CELL, cy=MARGIN+row*CELL, s=5;
+        final int C = dynCell, M = dynMargin, OX = dynOffX, OY = dynOffY;
+        int cx = OX+M+col*C, cy = OY+M+row*C, s = Math.max(3, C/12);
         g.setColor(new Color(0x8B4513));
-        g.setStroke(new BasicStroke(1.2f));
+        g.setStroke(new BasicStroke(Math.max(1f, C/55f)));
         if(col>0){g.drawLine(cx-s,cy-s,cx-s,cy-2);g.drawLine(cx-s,cy-s,cx-2,cy-s);}
         if(col<8){g.drawLine(cx+s,cy-s,cx+s,cy-2);g.drawLine(cx+s,cy-s,cx+2,cy-s);}
         if(col>0){g.drawLine(cx-s,cy+s,cx-s,cy+2);g.drawLine(cx-s,cy+s,cx-2,cy+s);}
         if(col<8){g.drawLine(cx+s,cy+s,cx+s,cy+2);g.drawLine(cx+s,cy+s,cx+2,cy+s);}
+        g.setStroke(new BasicStroke(1f));
     }
 
     private void drawLastMove(Graphics2D g) {
         if (lastFR < 0) return;
+        final int C = dynCell, M = dynMargin, R = dynPieceR, OX = dynOffX, OY = dynOffY;
         int sfr = toScreenRow(lastFR), sfc = toScreenCol(lastFC);
         int str = toScreenRow(lastTR), stc = toScreenCol(lastTC);
 
-        // 起点：黄绿色实心圆背景（上下文感知）
+        // 起点：黄绿色实心圆背景
         g.setColor(new Color(180, 230, 60, 160));
-        g.fillOval(MARGIN+sfc*CELL-PIECE_R, MARGIN+sfr*CELL-PIECE_R, PIECE_R*2, PIECE_R*2);
+        g.fillOval(OX+M+sfc*C-R, OY+M+sfr*C-R, R*2, R*2);
         // 终点：更亮的高亮，加粗边框
         g.setColor(new Color(120, 220, 30, 200));
-        g.fillOval(MARGIN+stc*CELL-PIECE_R, MARGIN+str*CELL-PIECE_R, PIECE_R*2, PIECE_R*2);
-        // 终点额外画一圈明亮边框，让落点更醒目
+        g.fillOval(OX+M+stc*C-R, OY+M+str*C-R, R*2, R*2);
         g.setColor(new Color(60, 200, 0, 230));
-        g.setStroke(new BasicStroke(3.5f));
-        g.drawOval(MARGIN+stc*CELL-PIECE_R, MARGIN+str*CELL-PIECE_R, PIECE_R*2, PIECE_R*2);
-        g.setStroke(new BasicStroke(1f)); // 重置描边
+        g.setStroke(new BasicStroke(Math.max(2f, R/8f)));
+        g.drawOval(OX+M+stc*C-R, OY+M+str*C-R, R*2, R*2);
+        g.setStroke(new BasicStroke(1f));
     }
 
     private void drawHighlight(Graphics2D g) {
-        if (aiThinking) return; // 思考中不显示选子高亮
+        if (aiThinking) return;
+        final int C = dynCell, M = dynMargin, R = dynPieceR, OX = dynOffX, OY = dynOffY;
         if (selRow != -1) {
-            int scx = MARGIN + toScreenCol(selCol)*CELL;
-            int scy = MARGIN + toScreenRow(selRow)*CELL;
-            // 选中棋子：亮黄色圆形背景 + 粗外圈
+            int scx = OX+M + toScreenCol(selCol)*C;
+            int scy = OY+M + toScreenRow(selRow)*C;
             g.setColor(new Color(255, 240, 0, 180));
-            g.fillOval(scx-PIECE_R, scy-PIECE_R, PIECE_R*2, PIECE_R*2);
+            g.fillOval(scx-R, scy-R, R*2, R*2);
             g.setColor(new Color(255, 200, 0, 230));
             g.setStroke(new BasicStroke(3f));
-            g.drawOval(scx-PIECE_R-2, scy-PIECE_R-2, PIECE_R*2+4, PIECE_R*2+4);
+            g.drawOval(scx-R-2, scy-R-2, R*2+4, R*2+4);
             g.setStroke(new BasicStroke(1f));
         }
         if (legalMoves != null) {
             for (int[] m : legalMoves) {
-                int cx = MARGIN + toScreenCol(m[1])*CELL;
-                int cy = MARGIN + toScreenRow(m[0])*CELL;
+                int cx = OX+M + toScreenCol(m[1])*C;
+                int cy = OY+M + toScreenRow(m[0])*C;
                 if (gs.board.getPiece(m[0], m[1]) != null) {
-                    // 有棋子的可走位置：双圈红色高亮（内外圈）+ 半透明填充，更醒目
                     g.setColor(new Color(220, 0, 0, 80));
-                    g.fillOval(cx-PIECE_R, cy-PIECE_R, PIECE_R*2, PIECE_R*2);
+                    g.fillOval(cx-R, cy-R, R*2, R*2);
                     g.setColor(new Color(220, 0, 0, 220));
                     g.setStroke(new BasicStroke(3.5f));
-                    g.drawOval(cx-PIECE_R, cy-PIECE_R, PIECE_R*2, PIECE_R*2);
+                    g.drawOval(cx-R, cy-R, R*2, R*2);
                     g.setColor(new Color(255, 80, 80, 180));
                     g.setStroke(new BasicStroke(1.5f));
-                    g.drawOval(cx-PIECE_R+5, cy-PIECE_R+5, (PIECE_R-5)*2, (PIECE_R-5)*2);
+                    g.drawOval(cx-R+5, cy-R+5, (R-5)*2, (R-5)*2);
                     g.setStroke(new BasicStroke(1f));
                 } else {
-                    // 空位可走：绘制一个较大的绿色实心圆 + 白色中心点，更易辨认
+                    int dot = Math.max(6, R/3);
+                    int big = Math.max(10, (int)(R*0.8));
                     g.setColor(new Color(0, 180, 0, 210));
-                    g.fillOval(cx-11, cy-11, 22, 22);
+                    g.fillOval(cx-big, cy-big, big*2, big*2);
                     g.setColor(new Color(255, 255, 255, 200));
-                    g.fillOval(cx-4, cy-4, 8, 8);
+                    g.fillOval(cx-dot/2, cy-dot/2, dot, dot);
                 }
             }
         }
     }
 
     private void drawPieces(Graphics2D g, Piece[][] grid) {
+        final int C = dynCell, M = dynMargin, R = dynPieceR, OX = dynOffX, OY = dynOffY;
+        int fontSize = Math.max(11, (int)(R * 19.0 / PIECE_R));
         for (int r=0;r<10;r++) for (int c=0;c<9;c++) {
             Piece p = grid[r][c];
             if (p == null) continue;
-            int cx = MARGIN + toScreenCol(c)*CELL;
-            int cy = MARGIN + toScreenRow(r)*CELL;
+            int cx = OX+M + toScreenCol(c)*C;
+            int cy = OY+M + toScreenRow(r)*C;
             Color bg     = p.isRed ? new Color(0xFFD700) : new Color(0xF0DEB0);
             Color border = p.isRed ? new Color(0xB22222) : new Color(0x333333);
             Color text   = p.isRed ? new Color(0xB22222) : new Color(0x111111);
 
             g.setColor(new Color(0,0,0,40));
-            g.fillOval(cx-PIECE_R+2, cy-PIECE_R+3, PIECE_R*2, PIECE_R*2);
+            g.fillOval(cx-R+2, cy-R+3, R*2, R*2);
             g.setColor(bg);
-            g.fillOval(cx-PIECE_R, cy-PIECE_R, PIECE_R*2, PIECE_R*2);
+            g.fillOval(cx-R, cy-R, R*2, R*2);
             g.setColor(border);
-            g.setStroke(new BasicStroke(2.5f));
-            g.drawOval(cx-PIECE_R, cy-PIECE_R, PIECE_R*2, PIECE_R*2);
+            g.setStroke(new BasicStroke(Math.max(1.5f, R/11f)));
+            g.drawOval(cx-R, cy-R, R*2, R*2);
             g.setStroke(new BasicStroke(1f));
-            g.drawOval(cx-PIECE_R+3, cy-PIECE_R+3, (PIECE_R-3)*2, (PIECE_R-3)*2);
+            int inner = Math.max(2, R/9);
+            g.drawOval(cx-R+inner, cy-R+inner, (R-inner)*2, (R-inner)*2);
             g.setColor(text);
-            g.setFont(new Font("宋体", Font.BOLD, 19));
+            g.setFont(new Font("宋体", Font.BOLD, fontSize));
             FontMetrics fm = g.getFontMetrics();
             String txt = p.getDisplay();
-            g.drawString(txt, cx-fm.stringWidth(txt)/2, cy+fm.getAscent()/2-2);
+            g.drawString(txt, cx-fm.stringWidth(txt)/2, cy+fm.getAscent()/2-1);
         }
     }
 
     /** AI思考中：棋盘上显示半透明遮罩 + 进度文字 */
     private void drawThinkingOverlay(Graphics2D g) {
-        // 半透明遮罩
+        final int C = dynCell, M = dynMargin, OX = dynOffX, OY = dynOffY;
         g.setColor(new Color(0, 0, 0, 55));
-        g.fillRoundRect(MARGIN, MARGIN, CELL*8, CELL*9, 12, 12);
+        g.fillRoundRect(OX+M, OY+M, C*8, C*9, 12, 12);
 
-        int cx = MARGIN + CELL * 4;
-        int baseY = MARGIN + CELL * 4 - 20;
+        int cx = OX+M + C * 4;
+        int baseY = OY+M + C * 4 - 20;
 
         // 跳动圆点动画
         long t = System.currentTimeMillis() / 350 % 4;

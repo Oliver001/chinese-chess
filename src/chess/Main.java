@@ -20,7 +20,7 @@ public class Main {
 
             JFrame frame = new JFrame("中国象棋 — 人机对弈  v4.0");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.setResizable(false);
+            frame.setResizable(true);
 
             ChessPanel panel = new ChessPanel(
                 dialog.humanIsRed,
@@ -31,6 +31,7 @@ public class Main {
             );
             frame.add(panel);
             frame.pack();
+            frame.setMinimumSize(new Dimension(700, 600));
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);
         });
