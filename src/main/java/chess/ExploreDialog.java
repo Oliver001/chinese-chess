@@ -428,23 +428,26 @@ public class ExploreDialog extends JDialog {
                     // 用AI快速评估（1.5秒每步）
                     AIEngine trialAI = new AIEngine();
                     trialAI.setTimeLimit(1500);
-                    final int[] oppBest = {-1, -1, -1, -1};
                     final int[] oppScore = {0};
                     final String[] oppPV = {""};
+                    final AIEngine.MoveSource[] oppSrc = {AIEngine.MoveSource.AI_SEARCH};
                     trialAI.setStatsListener(s -> {
                         oppScore[0] = s.boardScore;
                         oppPV[0] = s.pvLine;
+                        oppSrc[0] = s.source;
                     });
 
                     if (!trialBoard.hasLegalMoves(!snapRedTurn)) {
                         // 走此步后对方被将死/困毙 = 绝杀
                         int selfScore = snapRedTurn ? 99999 : -99999;
-                        candidates.add(new CandidateResult(mv, selfScore, "⚡ 绝杀！", snapBoard));
+                        candidates.add(new CandidateResult(mv, selfScore, "⚡ 绝杀！",
+                                AIEngine.MoveSource.AI_SEARCH, snapBoard));
                     } else {
                         trialAI.getBestMove(trialBoard, !snapRedTurn);
                         // oppScore 是红方视角分，从我方角度：红方走=分越高越好；黑方走=分越低越好
                         int myScore = oppScore[0]; // 已是红方视角
-                        candidates.add(new CandidateResult(mv, myScore, oppPV[0], snapBoard));
+                        candidates.add(new CandidateResult(mv, myScore, oppPV[0],
+                                oppSrc[0], snapBoard));
                     }
                 }
 
@@ -461,9 +464,11 @@ public class ExploreDialog extends JDialog {
                 int baseScore = scoreNow;
                 StringBuilder sb = new StringBuilder();
                 sb.append("▶ 当前局面：").append(side).append("走棋\n");
-                sb.append(scoreDesc(baseScore)).append("\n");
+                sb.append("  局面评分：").append(scoreDesc(baseScore)).append("\n");
+                sb.append("  说明：以下为 AI 对当前局面的候选分析，\n");
+                sb.append("  【来源】为预测后续应对时所用引擎\n");
                 sb.append("────────────────────\n");
-                sb.append(String.format("前 %d 个候选走法：\n\n", Math.min(MULTI_PV, candidates.size())));
+                sb.append(String.format("前 %d 个候选走法（🤖内置AI排序）：\n\n", Math.min(MULTI_PV, candidates.size())));
 
                 for (int i = 0; i < Math.min(MULTI_PV, candidates.size()); i++) {
                     CandidateResult cr = candidates.get(i);
@@ -474,15 +479,33 @@ public class ExploreDialog extends JDialog {
                         : "?";
                     int scoreDelta = snapRedTurn ? (cr.score - baseScore) : (baseScore - cr.score);
                     String deltaStr = scoreDelta > 0 ? "▲+" + scoreDelta : (scoreDelta < 0 ? "▼" + scoreDelta : "—");
-                    sb.append(String.format("%d. %s  %s\n", i + 1, moveStr, scoreDesc(cr.score)));
-                    sb.append(String.format("   变化：%s\n", deltaStr));
-                    if (cr.pvLine != null && !cr.pvLine.isEmpty()) {
+
+                    // 候选走法标题行：序号 + 走法 + 评分 + 变化 + 【来源】
+                    sb.append(String.format("%d. %s  %s  %s  【%s】\n",
+                            i + 1, moveStr, scoreDesc(cr.score), deltaStr,
+                            sourceTag(cr.oppSource)));
+
+                    // PV后续主线：转为单行 → 连接格式
+                    if (cr.pvLine != null && !cr.pvLine.isEmpty() && !cr.pvLine.startsWith("⚡")) {
+                        // pvLine 格式：每行 "▶ AI: 走法" 或 "△ 对手: 走法"
                         String[] pvLines = cr.pvLine.split("\n");
+                        StringBuilder pvRow = new StringBuilder("   └ 后续: ");
+                        boolean first = true;
                         for (String pvl : pvLines) {
-                            if (!pvl.trim().isEmpty())
-                                sb.append("   ").append(pvl.replace("▶ AI: ", "").replace("△ 对手: ", "  →")).append("\n");
+                            String cleaned = pvl.trim()
+                                    .replace("▶ AI: ", "")
+                                    .replace("△ 对手: ", "");
+                            if (!cleaned.isEmpty()) {
+                                if (!first) pvRow.append(" → ");
+                                pvRow.append(cleaned);
+                                first = false;
+                            }
                         }
+                        sb.append(pvRow).append("\n");
+                    } else if (cr.pvLine != null && cr.pvLine.startsWith("⚡")) {
+                        sb.append("   └ ").append(cr.pvLine).append("\n");
                     }
+
                     if (i < Math.min(MULTI_PV, candidates.size()) - 1)
                         sb.append("\n");
                 }
@@ -548,10 +571,24 @@ public class ExploreDialog extends JDialog {
     /** 候选结果 */
     private static class CandidateResult {
         final int[] move;
-        final int score;       // 红方视角
-        final String pvLine;
-        CandidateResult(int[] move, int score, String pvLine, Board board) {
-            this.move = move; this.score = score; this.pvLine = pvLine;
+        final int score;                            // 红方视角
+        final String pvLine;                        // 后续PV（原始格式）
+        final AIEngine.MoveSource oppSource;        // 对手应对的来源
+        CandidateResult(int[] move, int score, String pvLine,
+                        AIEngine.MoveSource oppSource, Board board) {
+            this.move = move; this.score = score;
+            this.pvLine = pvLine;
+            this.oppSource = oppSource != null ? oppSource : AIEngine.MoveSource.AI_SEARCH;
+        }
+    }
+
+    /** 将来源枚举转为图标标签 */
+    private static String sourceTag(AIEngine.MoveSource src) {
+        if (src == null) return "🤖";
+        switch (src) {
+            case CLOUD_BOOK: return "☁云库";
+            case LOCAL_BOOK: return "📖开局库";
+            default:         return "🤖内置AI";
         }
     }
 
@@ -722,13 +759,41 @@ public class ExploreDialog extends JDialog {
             return;
         }
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < recs.size(); i++) {
+        // 按回合组织：每回合两步（红/黑），并在每步前标注走棋方
+        int roundNum = 1;
+        for (int i = 0; i < recs.size(); ) {
             StepRecord rec = recs.get(i);
             String nota = GameState.buildNotationStatic(rec.fr, rec.fc, rec.tr, rec.tc, rec.snapshot, rec.wasRed);
-            String prefix = rec.wasRed
-                ? String.format("%d. 红 %s", i/2 + 1, nota)
-                : String.format("   黑 %s", nota);
-            sb.append(prefix).append("\n");
+            if (rec.wasRed) {
+                // 红方走法，开始新回合
+                sb.append(roundNum).append(". 红 ").append(nota);
+                i++;
+                if (i < recs.size() && !recs.get(i).wasRed) {
+                    // 同回合黑方走法
+                    StepRecord blackRec = recs.get(i);
+                    String blackNota = GameState.buildNotationStatic(
+                        blackRec.fr, blackRec.fc, blackRec.tr, blackRec.tc,
+                        blackRec.snapshot, blackRec.wasRed);
+                    sb.append(" → 黑 ").append(blackNota);
+                    i++;
+                }
+                sb.append("\n");
+                roundNum++;
+            } else {
+                // 黑方先走（黑方执先手或黑方开始分析的局面）
+                sb.append(roundNum).append(". 黑 ").append(nota);
+                i++;
+                if (i < recs.size() && recs.get(i).wasRed) {
+                    StepRecord redRec = recs.get(i);
+                    String redNota = GameState.buildNotationStatic(
+                        redRec.fr, redRec.fc, redRec.tr, redRec.tc,
+                        redRec.snapshot, redRec.wasRed);
+                    sb.append(" → 红 ").append(redNota);
+                    i++;
+                }
+                sb.append("\n");
+                roundNum++;
+            }
         }
         notationArea.setText(sb.toString().stripTrailing());
         // 滚动到底

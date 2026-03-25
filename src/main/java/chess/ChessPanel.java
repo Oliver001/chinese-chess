@@ -801,6 +801,9 @@ public class ChessPanel extends JPanel {
                         renderSnapshot = null;
                         boolean wasRed = gs.redTurn;
                         lastFR=bmv[0]; lastFC=bmv[1]; lastTR=bmv[2]; lastTC=bmv[3];
+                        // 走棋前生成中文描述
+                        String bookMoveStr = GameState.buildNotationStatic(
+                            bmv[0],bmv[1],bmv[2],bmv[3], gs.board.copyGrid(), wasRed);
                         boolean isCapture = gs.board.getPiece(bmv[2], bmv[3]) != null;
                         Piece cap = gs.doMove(bmv[0], bmv[1], bmv[2], bmv[3]);
                         gs.applyIncrement(wasRed);
@@ -808,10 +811,11 @@ public class ChessPanel extends JPanel {
                         if (isCapture) sound.playCapture(); else sound.playMove();
                         updateNotation();
                         updateAdvantage(Evaluator.evaluate(gs.board));
-                        sourceLabel.setText("<html><center>" + (fromCloud ? "☁ 云库" : "📖 本地开局库") + "</center></html>");
+                        String bookSrc = fromCloud ? "☁ 云库" : "📖 本地开局库";
+                        sourceLabel.setText("<html><center>" + bookSrc + "</center></html>");
                         mateLabel.setText(" ");
                         mateLabel.setBackground(new Color(0xF5E6C8));
-                        bestMoveArea.setText("（开局库走法）");
+                        bestMoveArea.setText(bookMoveStr + "  【" + bookSrc + "】");
                         checkGameOver(cap);
                         boardPanel.repaint();
                     } else {
@@ -1009,6 +1013,9 @@ public class ChessPanel extends JPanel {
                     renderSnapshot = null;
                     boolean wasRed = gs.redTurn;
                     lastFR=bmv[0]; lastFC=bmv[1]; lastTR=bmv[2]; lastTC=bmv[3];
+                    // 走棋前生成中文描述
+                    String bookMoveStr = GameState.buildNotationStatic(
+                        bmv[0],bmv[1],bmv[2],bmv[3], gs.board.copyGrid(), wasRed);
                     boolean isCapture = gs.board.getPiece(bmv[2], bmv[3]) != null;
                     Piece cap = gs.doMove(bmv[0], bmv[1], bmv[2], bmv[3]);
                     gs.applyIncrement(wasRed);
@@ -1016,10 +1023,11 @@ public class ChessPanel extends JPanel {
                     if (isCapture) sound.playCapture(); else sound.playMove();
                     updateNotation();
                     updateAdvantage(Evaluator.evaluate(gs.board));
-                    sourceLabel.setText("<html><center>" + (fromCloud ? "☁ 云库" : "📖 本地开局库") + "</center></html>");
+                    String bookSrc2 = fromCloud ? "☁ 云库" : "📖 本地开局库";
+                    sourceLabel.setText("<html><center>" + bookSrc2 + "</center></html>");
                     mateLabel.setText(" ");
                     mateLabel.setBackground(new Color(0xF5E6C8));
-                    bestMoveArea.setText("（开局库走法）");
+                    bestMoveArea.setText(bookMoveStr + "  【" + bookSrc2 + "】");
                     checkGameOver(cap);
                     boardPanel.repaint();
                 } else {
@@ -1739,6 +1747,11 @@ public class ChessPanel extends JPanel {
         // pvLine 每行格式："▶ AI: 炮二平五" 或 "△ 对手: 马8进7"
         // 显示格式：深度N  炮二平五 → 马8进7 → 车一进一（去掉红/黑前缀，因规则已知奇红偶黑）
         String[] steps = pv.split("\n");
+        // 来源标注
+        String srcTag;
+        if (s.source == AIEngine.MoveSource.CLOUD_BOOK)  srcTag = " ☁云库";
+        else if (s.source == AIEngine.MoveSource.LOCAL_BOOK) srcTag = " 📖开局库";
+        else srcTag = "";  // AI搜索不需要额外标注，深度行已说明
 
         // 主线（第depth层）：一行
         StringBuilder mainLine = new StringBuilder();
@@ -1756,6 +1769,7 @@ public class ChessPanel extends JPanel {
             if (i > 0) mainLine.append(" → ");
             mainLine.append(notation);
         }
+        if (!srcTag.isEmpty()) mainLine.append(srcTag);
 
         // 每个浅层子序列展示一行（去掉最后1步、2步...）
         StringBuilder sb = new StringBuilder();
