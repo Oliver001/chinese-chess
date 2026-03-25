@@ -98,7 +98,7 @@ public class ReviewPanel extends JPanel {
         // 右：信息面板（宽度随窗口等比扩展）
         JPanel right = new JPanel(new BorderLayout(0, 6));
         right.setPreferredSize(new Dimension(SIDE_W, BOARD_H));
-        right.setMinimumSize(new Dimension(SIDE_W, 400));
+        right.setMinimumSize(new Dimension(SIDE_W, 560));
         right.setOpaque(false);
         rightPanel = right;
 
@@ -661,7 +661,7 @@ public class ReviewPanel extends JPanel {
         ReviewPanel panel = new ReviewPanel(record);
         frame.add(panel);
         frame.pack();
-        frame.setMinimumSize(new Dimension(700, 580));
+        frame.setMinimumSize(new Dimension(860, 680));
         frame.setLocationRelativeTo(parent);
         frame.setVisible(true);
     }
