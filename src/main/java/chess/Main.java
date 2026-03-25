@@ -29,6 +29,7 @@ public class Main {
                 dialog.tcBaseMinutes,
                 dialog.tcIncSeconds
             );
+            frame.setJMenuBar(panel.createMenuBar());
             frame.add(panel);
             frame.pack();
             frame.setMinimumSize(new Dimension(700, 600));

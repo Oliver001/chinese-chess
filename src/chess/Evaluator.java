@@ -55,7 +55,63 @@ public class Evaluator {
             int v=baseVal(p.type)+posVal(p,r,c);
             score += p.isRed ? v : -v;
         }
+        // ── Hanging piece 惩罚：被对方攻击且未被己方保护的棋子扣分 ──────────────
+        // 只惩罚车、马、炮（高价值棋子送子问题最多），象/仕/卒不计（价值低，容忍度高）
+        score += hangingPenalty(board, true)   // 红方悬空子 → 负值（对红不利）
+               + hangingPenalty(board, false);  // 黑方悬空子 → 正值（对红有利）
         return score;
+    }
+
+    /**
+     * 计算 isRed 方棋子中悬空棋子（被对方攻击且未被己方保护）的代价。
+     * 返回值：从红方视角计算（isRed=true 返回负值惩罚红，isRed=false 返回正值惩罚黑）。
+     * 惩罚约为 min(攻击者价值, 被吃子价值) * 系数（仅估计，不做完整SEE）。
+     */
+    private static int hangingPenalty(Board board, boolean isRed) {
+        int penalty = 0;
+        for (int r = 0; r < 10; r++) {
+            for (int c = 0; c < 9; c++) {
+                Piece p = board.getPiece(r, c);
+                if (p == null || p.isRed != isRed) continue;
+                // 只关注高价值棋子
+                if (p.type == Piece.Type.KING || p.type == Piece.Type.PAWN
+                        || p.type == Piece.Type.ADVISOR || p.type == Piece.Type.ELEPHANT) continue;
+                // 一次扫描同时统计攻击者和保护者
+                int atkCount = 0, minAtkVal = Integer.MAX_VALUE;
+                boolean defended = false;
+                for (int rr = 0; rr < 10; rr++) {
+                    for (int cc = 0; cc < 9; cc++) {
+                        Piece q = board.getPiece(rr, cc);
+                        if (q == null) continue;
+                        if (rr == r && cc == c) continue; // 跳过自身
+                        for (int[] mv : board.getRawMoves(rr, cc)) {
+                            if (mv[0] == r && mv[1] == c) {
+                                if (q.isRed != isRed) { // 对方攻击者
+                                    atkCount++;
+                                    int av = baseVal(q.type);
+                                    if (av < minAtkVal) minAtkVal = av;
+                                } else { // 己方保护者
+                                    defended = true;
+                                }
+                                break;
+                            }
+                        }
+                        if (atkCount > 0 && defended) break; // 已足够信息可提前退出内层
+                    }
+                    if (atkCount > 0 && defended) break;
+                }
+                if (atkCount == 0) continue; // 未被攻击，跳过
+                int myVal = baseVal(p.type);
+                if (!defended) {
+                    // 无保护，完全悬空：惩罚80%的棋子价值
+                    penalty += myVal * 4 / 5;
+                } else if (minAtkVal < myVal) {
+                    // 有保护但攻击者价值更低，以小换大风险，惩罚50%净亏损
+                    penalty += (myVal - minAtkVal) / 2;
+                }
+            }
+        }
+        return isRed ? -penalty : penalty;
     }
 
     private static int baseVal(Piece.Type t){

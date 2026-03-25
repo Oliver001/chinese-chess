@@ -211,6 +211,59 @@ public class Board {
         return false;
     }
 
+    /**
+     * 判断格子(tr,tc)是否被颜色为 attackerIsRed 的棋子攻击（不考虑王面对面飞将）。
+     * 用于 Evaluator 中计算 hanging piece 惩罚。
+     */
+    public boolean isAttackedBy(int tr, int tc, boolean attackerIsRed) {
+        for (int r = 0; r < 10; r++) {
+            Piece p = grid[r][0]; // inner loop below
+            for (int c = 0; c < 9; c++) {
+                p = grid[r][c];
+                if (p == null || p.isRed != attackerIsRed) continue;
+                for (int[] mv : getRawMoves(r, c))
+                    if (mv[0] == tr && mv[1] == tc) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 统计格子(tr,tc)被 attackerIsRed 颜色攻击的棋子数量和最小攻击者价值。
+     * 返回 int[2]：[攻击者数, 最小价值攻击者的基础价值（对应 Evaluator 量级：车1000 马400 炮450...）]
+     */
+    public int[] getAttackInfo(int tr, int tc, boolean attackerIsRed) {
+        int count = 0, minVal = Integer.MAX_VALUE;
+        int[] valMap = {0, 10000, 1000, 450, 400, 200, 200, 100}; // KING,ROOK,CANNON,HORSE,ELEPHANT,ADVISOR,PAWN
+        for (int r = 0; r < 10; r++) {
+            for (int c = 0; c < 9; c++) {
+                Piece p = grid[r][c];
+                if (p == null || p.isRed != attackerIsRed) continue;
+                for (int[] mv : getRawMoves(r, c)) {
+                    if (mv[0] == tr && mv[1] == tc) {
+                        count++;
+                        int v = pieceBaseVal(p.type);
+                        if (v < minVal) minVal = v;
+                        break;
+                    }
+                }
+            }
+        }
+        return new int[]{count, minVal == Integer.MAX_VALUE ? 0 : minVal};
+    }
+
+    private static int pieceBaseVal(Piece.Type t) {
+        switch (t) {
+            case ROOK:     return 1000;
+            case CANNON:   return 450;
+            case HORSE:    return 400;
+            case ADVISOR:
+            case ELEPHANT: return 200;
+            case PAWN:     return 100;
+            default:       return 10000;
+        }
+    }
+
     public boolean hasLegalMoves(boolean red){
         for(int r=0;r<10;r++) for(int c=0;c<9;c++)
             if(grid[r][c]!=null&&grid[r][c].isRed==red&&!getLegalMoves(r,c).isEmpty()) return true;

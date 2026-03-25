@@ -69,7 +69,7 @@ public class ChessPanel extends JPanel {
 
     // ---- 暂停 ----
     private boolean paused = false;
-    private JButton pauseBtn;        // 暂停/继续按钮（成员变量方便更新文字）
+    private JMenuItem pauseMenuItem;  // 暂停/继续菜单项（成员变量方便更新文字）
 
     // ===================== 构造 =====================
     /** 无参构造（兼容旧代码，使用默认设置） */
@@ -347,7 +347,7 @@ public class ChessPanel extends JPanel {
 
         side.add(splitCenter, BorderLayout.CENTER);
 
-        // ── 底部：状态行 + 按钮 ──
+        // ── 底部：仅保留状态行（按钮已移至菜单栏）──
         JPanel bottom = new JPanel(new BorderLayout(4, 4));
         bottom.setOpaque(false);
 
@@ -356,39 +356,101 @@ public class ChessPanel extends JPanel {
         statusLabel.setForeground(new Color(0xB22222));
         bottom.add(statusLabel, BorderLayout.NORTH);
 
-        JPanel btns = new JPanel(new GridLayout(5, 2, 4, 4));
-        btns.setOpaque(false);
-        addBtn(btns, "悔棋",     e -> doUndo());
-        addBtn(btns, "新游戏",   e -> showNewGameDialog());
-        addBtn(btns, "保存局面", e -> saveFEN());
-        addBtn(btns, "读取局面", e -> loadFEN());
-        addBtn(btns, "难度",     e -> showDifficultyDialog());
-        addBtn(btns, "历史棋谱", e -> ReviewPanel.showReviewDialog(this));
-        addBtn(btns, "翻转棋盘", e -> {
+        side.add(bottom, BorderLayout.SOUTH);
+        return side;
+    }
+
+    /**
+     * 创建菜单栏，由 Main.java 调用后安装到 JFrame 上。
+     * 菜单栏包含：对局、设置、视图 三个菜单。
+     */
+    public JMenuBar createMenuBar() {
+        JMenuBar menuBar = new JMenuBar();
+
+        // ── 对局 ──
+        JMenu gameMenu = new JMenu("对局(G)");
+        gameMenu.setMnemonic('G');
+
+        JMenuItem newGameItem = new JMenuItem("新游戏(N)");
+        newGameItem.setMnemonic('N');
+        newGameItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_N, InputEvent.CTRL_DOWN_MASK));
+        newGameItem.addActionListener(e -> showNewGameDialog());
+
+        JMenuItem undoItem = new JMenuItem("悔棋(U)");
+        undoItem.setMnemonic('U');
+        undoItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK));
+        undoItem.addActionListener(e -> doUndo());
+
+        pauseMenuItem = new JMenuItem("暂停/继续(P)");
+        pauseMenuItem.setMnemonic('P');
+        pauseMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0));
+        pauseMenuItem.addActionListener(e -> togglePause());
+
+        JMenuItem historyItem = new JMenuItem("历史棋谱(H)");
+        historyItem.setMnemonic('H');
+        historyItem.addActionListener(e -> ReviewPanel.showReviewDialog(this));
+
+        JMenuItem editItem = new JMenuItem("编辑棋局(E)");
+        editItem.setMnemonic('E');
+        editItem.addActionListener(e -> enterEditMode());
+
+        JSeparator sep1 = new JSeparator();
+
+        JMenuItem saveFenItem = new JMenuItem("保存局面(S)");
+        saveFenItem.setMnemonic('S');
+        saveFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK));
+        saveFenItem.addActionListener(e -> saveFEN());
+
+        JMenuItem loadFenItem = new JMenuItem("读取局面(O)");
+        loadFenItem.setMnemonic('O');
+        loadFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
+        loadFenItem.addActionListener(e -> loadFEN());
+
+        gameMenu.add(newGameItem);
+        gameMenu.add(undoItem);
+        gameMenu.add(pauseMenuItem);
+        gameMenu.add(sep1);
+        gameMenu.add(historyItem);
+        gameMenu.add(editItem);
+        gameMenu.add(new JSeparator());
+        gameMenu.add(saveFenItem);
+        gameMenu.add(loadFenItem);
+
+        // ── 设置 ──
+        JMenu settingsMenu = new JMenu("设置(S)");
+        settingsMenu.setMnemonic('S');
+
+        JMenuItem diffItem = new JMenuItem("AI难度(D)");
+        diffItem.setMnemonic('D');
+        diffItem.addActionListener(e -> showDifficultyDialog());
+
+        // 音效开关（CheckBox菜单项）
+        JCheckBoxMenuItem soundItem = new JCheckBoxMenuItem("音效(M)", sound.isEnabled());
+        soundItem.setMnemonic('M');
+        soundItem.addActionListener(e -> sound.setEnabled(soundItem.isSelected()));
+
+        settingsMenu.add(diffItem);
+        settingsMenu.add(soundItem);
+
+        // ── 视图 ──
+        JMenu viewMenu = new JMenu("视图(V)");
+        viewMenu.setMnemonic('V');
+
+        JMenuItem flipItem = new JMenuItem("翻转棋盘(F)");
+        flipItem.setMnemonic('F');
+        flipItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F, InputEvent.CTRL_DOWN_MASK));
+        flipItem.addActionListener(e -> {
             boardFlipped = !boardFlipped;
             refreshTimePanelOrder();
             boardPanel.repaint();
         });
-        JButton sndBtn = new JButton(sound.isEnabled() ? "🔊 音效" : "🔇 静音");
-        sndBtn.setFont(new Font("宋体", Font.PLAIN, 11));
-        sndBtn.addActionListener(e -> {
-            sound.setEnabled(!sound.isEnabled());
-            sndBtn.setText(sound.isEnabled() ? "🔊 音效" : "🔇 静音");
-        });
-        btns.add(sndBtn);
 
-        // 暂停按钮
-        pauseBtn = new JButton("⏸ 暂停");
-        pauseBtn.setFont(new Font("宋体", Font.PLAIN, 11));
-        pauseBtn.addActionListener(e -> togglePause());
-        btns.add(pauseBtn);
+        viewMenu.add(flipItem);
 
-        // 摆棋按钮
-        addBtn(btns, "✏ 编辑棋局", e -> enterEditMode());
-
-        bottom.add(btns, BorderLayout.CENTER);
-        side.add(bottom, BorderLayout.SOUTH);
-        return side;
+        menuBar.add(gameMenu);
+        menuBar.add(settingsMenu);
+        menuBar.add(viewMenu);
+        return menuBar;
     }
 
     private void addBtn(JPanel p, String txt, ActionListener al) {
@@ -732,7 +794,8 @@ public class ChessPanel extends JPanel {
     private void togglePause() {
         if (gs.gameOver) return;
         paused = !paused;
-        pauseBtn.setText(paused ? "▶ 继续" : "⏸ 暂停");
+        if (pauseMenuItem != null)
+            pauseMenuItem.setText(paused ? "继续(P)" : "暂停/继续(P)");
         if (paused) {
             setStatus("⏸ 游戏已暂停", true);
         } else {
@@ -773,7 +836,8 @@ public class ChessPanel extends JPanel {
             setStatus((redTurn == gs.humanIsRed ? "红方（你）" : "AI") + " 走棋",
                     redTurn == gs.humanIsRed);
             paused = wasPaused;
-            pauseBtn.setText(paused ? "▶ 继续" : "⏸ 暂停");
+            if (pauseMenuItem != null)
+                pauseMenuItem.setText(paused ? "继续(P)" : "暂停/继续(P)");
             boardPanel.repaint();
             // 若轮到AI走，触发AI
             if (!paused && gs.redTurn != gs.humanIsRed) triggerAI();
