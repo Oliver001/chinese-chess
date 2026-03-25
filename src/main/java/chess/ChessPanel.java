@@ -411,9 +411,9 @@ public class ChessPanel extends JPanel {
 
         // ── 中部：棋谱（上）+ AI预测（下），用 JSplitPane 可拖分 ──
 
-        // 棋谱：JTable 多列表格，每行一手棋（序号、红方走法、黑方走法）
+        // 棋谱：JTable 多列表格，每行两手棋（序号+红方+黑方 × 2列）
         notationModel = new javax.swing.table.DefaultTableModel(
-                new Object[]{"序", "红方", "黑方"}, 0) {
+                new Object[]{"序", "红方", "黑方", "序", "红方", "黑方"}, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         notationTable = new javax.swing.JTable(notationModel);
@@ -427,17 +427,18 @@ public class ChessPanel extends JPanel {
         notationTable.getTableHeader().setBackground(new Color(0xF0D080));
         notationTable.getTableHeader().setReorderingAllowed(false);
         notationTable.getTableHeader().setResizingAllowed(true);
-        // 列宽：序号窄，走法均分
-        notationTable.getColumnModel().getColumn(0).setPreferredWidth(36);
-        notationTable.getColumnModel().getColumn(0).setMaxWidth(48);
-        notationTable.getColumnModel().getColumn(1).setPreferredWidth(80);
-        notationTable.getColumnModel().getColumn(2).setPreferredWidth(80);
-        // 居中对齐
+        // 列宽：序号窄，走法均分，两组各占一半
+        int[] colWidths = {30, 72, 72, 30, 72, 72};
+        for (int ci = 0; ci < colWidths.length; ci++) {
+            notationTable.getColumnModel().getColumn(ci).setPreferredWidth(colWidths[ci]);
+            if (ci == 0 || ci == 3)
+                notationTable.getColumnModel().getColumn(ci).setMaxWidth(40);
+        }
+        // 居中对齐（所有列）
         javax.swing.table.DefaultTableCellRenderer center = new javax.swing.table.DefaultTableCellRenderer();
         center.setHorizontalAlignment(SwingConstants.CENTER);
-        notationTable.getColumnModel().getColumn(0).setCellRenderer(center);
-        notationTable.getColumnModel().getColumn(1).setCellRenderer(center);
-        notationTable.getColumnModel().getColumn(2).setCellRenderer(center);
+        for (int ci = 0; ci < 6; ci++)
+            notationTable.getColumnModel().getColumn(ci).setCellRenderer(center);
 
         JScrollPane scroll = new JScrollPane(notationTable,
                 JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
@@ -788,46 +789,72 @@ public class ChessPanel extends JPanel {
 
         // ★ 判断使用外部引擎还是内置AI
         if (externalEngine != null && externalEngine.isReady()) {
-            // ── 外部引擎路径：先查开局库，命中则直接走棋，跳过引擎 ──
-            OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(gs.board, gs.redTurn);
-            if (bookResult != null) {
-                final int[] bmv = bookResult.move;
-                // 验证：起点有棋子且属于当前走棋方，终点在棋盘内
-                Piece movingPiece = gs.board.getPiece(bmv[0], bmv[1]);
-                boolean valid = movingPiece != null && movingPiece.isRed == gs.redTurn
-                        && bmv[2] >= 0 && bmv[2] <= 9 && bmv[3] >= 0 && bmv[3] <= 8;
-                if (!valid) {
-                    // 开局库走法非法，降级到引擎
-                    bookResult = null;
-                }
-            }
-            if (bookResult != null) {
-                final int[] bmv = bookResult.move;
-                final boolean fromCloud = bookResult.fromCloud;
-                animTimer.stop();
-                renderSnapshot = null;
-                boolean wasRed = gs.redTurn;
-                lastFR=bmv[0]; lastFC=bmv[1]; lastTR=bmv[2]; lastTC=bmv[3];
-                boolean isCapture = gs.board.getPiece(bmv[2], bmv[3]) != null;
-                Piece cap = gs.doMove(bmv[0], bmv[1], bmv[2], bmv[3]);
-                gs.applyIncrement(wasRed);
-                aiThinking = false;
-                if (isCapture) sound.playCapture(); else sound.playMove();
-                updateNotation();
-                updateAdvantage(Evaluator.evaluate(gs.board));
-                sourceLabel.setText("<html><center>" + (fromCloud ? "☁ 云库" : "📖 本地开局库") + "</center></html>");
-                mateLabel.setText(" ");
-                mateLabel.setBackground(new Color(0xF5E6C8));
-                bestMoveArea.setText("（开局库走法）");
-                checkGameOver(cap);
-                boardPanel.repaint();
-                return;
-            }
+            // ── 外部引擎路径：先在后台线程查开局库，命中则直接走棋，否则交给引擎 ──
+            final Board boardForBook = new Board();
+            for (int r = 0; r < 10; r++)
+                for (int c = 0; c < 9; c++)
+                    boardForBook.grid[r][c] = gs.board.grid[r][c] != null
+                            ? gs.board.grid[r][c].copy() : null;
+            final boolean redTurnForBook = gs.redTurn;
 
-            setStatus("外部引擎思考中... [" + externalEngine.getName() + "]", false);
-            sourceLabel.setText("<html><center>🔌 " + externalEngine.getName() + "</center></html>");
-            mateLabel.setText(" ");
-            mateLabel.setBackground(new Color(0xF5E6C8));
+            setStatus("查询开局库...", false);
+            new Thread(() -> {
+                // 后台查开局库（可能有网络请求，不阻塞EDT）
+                OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(boardForBook, redTurnForBook);
+                if (bookResult != null) {
+                    final int[] bmv = bookResult.move;
+                    // 验证：起点有棋子且属于当前走棋方，终点在棋盘内
+                    Piece movingPiece = boardForBook.getPiece(bmv[0], bmv[1]);
+                    boolean valid = movingPiece != null && movingPiece.isRed == redTurnForBook
+                            && bmv[2] >= 0 && bmv[2] <= 9 && bmv[3] >= 0 && bmv[3] <= 8;
+                    if (!valid) bookResult = null;
+                }
+
+                final OpeningBook.LookupResult finalBook = bookResult;
+                SwingUtilities.invokeLater(() -> {
+                    if (!aiThinking) return; // 游戏状态已变（如用户新开游戏）
+                    if (finalBook != null) {
+                        // 开局库命中，直接走棋
+                        final int[] bmv = finalBook.move;
+                        final boolean fromCloud = finalBook.fromCloud;
+                        animTimer.stop();
+                        renderSnapshot = null;
+                        boolean wasRed = gs.redTurn;
+                        lastFR=bmv[0]; lastFC=bmv[1]; lastTR=bmv[2]; lastTC=bmv[3];
+                        boolean isCapture = gs.board.getPiece(bmv[2], bmv[3]) != null;
+                        Piece cap = gs.doMove(bmv[0], bmv[1], bmv[2], bmv[3]);
+                        gs.applyIncrement(wasRed);
+                        aiThinking = false;
+                        if (isCapture) sound.playCapture(); else sound.playMove();
+                        updateNotation();
+                        updateAdvantage(Evaluator.evaluate(gs.board));
+                        sourceLabel.setText("<html><center>" + (fromCloud ? "☁ 云库" : "📖 本地开局库") + "</center></html>");
+                        mateLabel.setText(" ");
+                        mateLabel.setBackground(new Color(0xF5E6C8));
+                        bestMoveArea.setText("（开局库走法）");
+                        checkGameOver(cap);
+                        boardPanel.repaint();
+                    } else {
+                        // 开局库未命中，交给外部引擎
+                        triggerExternalEngine();
+                    }
+                });
+            }, "BookLookup-ExtEngine").start();
+            return;
+        }
+
+        // 无外部引擎，走内置AI路径
+        triggerBuiltinAI();
+    }
+    private void triggerExternalEngine() {
+        if (!aiThinking || gs.gameOver) return;
+        int timeMs = gs.difficulty.aiTimeMs;
+        if (externalEngine == null || !externalEngine.isReady()) return;
+
+        setStatus("外部引擎思考中... [" + externalEngine.getName() + "]", false);
+        sourceLabel.setText("<html><center>🔌 " + externalEngine.getName() + "</center></html>");
+        mateLabel.setText(" ");
+        mateLabel.setBackground(new Color(0xF5E6C8));
 
             final Board boardSnapshot = new Board();
             for (int r = 0; r < 10; r++)
@@ -961,8 +988,13 @@ public class ChessPanel extends JPanel {
                         }
                     }
                 });
-            return; // 外部引擎路径到此结束，剩余代码走内置AI
-        }
+    }
+
+    // ===================== 内置AI =====================
+    private void triggerBuiltinAI() {
+        if (!aiThinking || gs.gameOver) return;
+        String diffLabel = gs.difficulty.label;
+        int timeMs = gs.difficulty.aiTimeMs;
 
         setStatus("AI 思考中... [" + diffLabel + "]", false);
         sourceLabel.setText("<html><center>🔍 查询云库/开局库...</center></html>");
@@ -1604,10 +1636,20 @@ public class ChessPanel extends JPanel {
     private void updateNotation() {
         notationModel.setRowCount(0);
         int size = gs.notations.size();
-        for (int i = 0; i < size; i += 2) {
-            String red = gs.notations.get(i);
-            String blk = (i + 1 < size) ? gs.notations.get(i + 1) : "";
-            notationModel.addRow(new Object[]{i / 2 + 1, red, blk});
+        // 每行显示两手棋（4步）：[序1, 红1, 黑1, 序2, 红2, 黑2]
+        for (int i = 0; i < size; i += 4) {
+            // 第一手
+            int moveNo1 = i / 2 + 1;
+            String red1 = i     < size ? gs.notations.get(i)   : "";
+            String blk1 = i + 1 < size ? gs.notations.get(i+1) : "";
+            // 第二手（可能不存在）
+            Object seq2 = "", red2 = "", blk2 = "";
+            if (i + 2 < size) {
+                seq2 = i / 2 + 2;
+                red2 = i + 2 < size ? gs.notations.get(i+2) : "";
+                blk2 = i + 3 < size ? gs.notations.get(i+3) : "";
+            }
+            notationModel.addRow(new Object[]{moveNo1, red1, blk1, seq2, red2, blk2});
         }
         // 自动滚动到最新一行
         if (notationModel.getRowCount() > 0) {
