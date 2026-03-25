@@ -1570,10 +1570,26 @@ public class ChessPanel extends JPanel {
     private void updateNotation() {
         StringBuilder sb = new StringBuilder();
         int size = gs.notations.size();
-        // 多列格式：每行 "N. 红方走法  黑方走法"，固定宽度对齐
-        for (int i = 0; i < size; i += 2) {
-            sb.append(String.format("%3d. %-10s", i/2+1, gs.notations.get(i)));
-            if (i+1 < size) sb.append("  ").append(gs.notations.get(i+1));
+        // 真正多列：每行显示两手棋（4步）
+        // 格式：" N. 红方走法 黑方走法   N+1. 红方走法 黑方走法"
+        // 每手棋占固定宽度（序号3+点1+空1+红7+空1+黑7 = 20字符），两手之间留3空格
+        for (int i = 0; i < size; i += 4) {
+            // 第一手（本行左列）
+            int move1 = i / 2 + 1;
+            String red1  = i   < size ? gs.notations.get(i)   : "";
+            String blk1  = i+1 < size ? gs.notations.get(i+1) : "";
+            String col1  = String.format("%3d.%-7s %-7s", move1, red1, blk1);
+
+            // 第二手（本行右列），可能不存在
+            if (i + 2 < size) {
+                int move2 = i / 2 + 2;
+                String red2 = i+2 < size ? gs.notations.get(i+2) : "";
+                String blk2 = i+3 < size ? gs.notations.get(i+3) : "";
+                sb.append(col1).append("   ")
+                  .append(String.format("%3d.%-7s %-7s", move2, red2, blk2));
+            } else {
+                sb.append(col1);
+            }
             sb.append('\n');
         }
         notationArea.setText(sb.toString());
