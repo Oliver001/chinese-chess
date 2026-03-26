@@ -46,6 +46,9 @@ public class ReviewPanel extends JPanel {
     private ScoreChart scoreChart;
     private JButton prevBtn, nextBtn, firstBtn, lastBtn;
 
+    // ---- 棋盘翻转 ----
+    private boolean boardFlipped = false;  // true=上下左右翻转（黑方在下）
+
     // ---- AI分析 ----
     private final AIEngine reviewAI = new AIEngine();
     private JTextArea analysisArea;   // 分析结果文本区
@@ -57,7 +60,8 @@ public class ReviewPanel extends JPanel {
         setLayout(new BorderLayout(4, 4));
         setBackground(new Color(0xEEE0B0));
         setBorder(new EmptyBorder(8,8,8,8));
-
+        // 执黑时默认翻转，让黑方在下方
+        boardFlipped = !record.humanIsRed;
         buildUI();
         gotoStep(0);
     }
@@ -203,13 +207,20 @@ public class ReviewPanel extends JPanel {
         bottom.add(scoreChart, BorderLayout.NORTH);
 
         // 翻页按钮
-        JPanel nav = new JPanel(new GridLayout(1,4,4,0));
+        JPanel nav = new JPanel(new GridLayout(2, 4, 4, 3));
         nav.setOpaque(false);
         firstBtn = makeNavBtn("|◀", e -> gotoStep(0));
         prevBtn  = makeNavBtn("◀",  e -> gotoStep(Math.max(0, currentStep-1)));
         nextBtn  = makeNavBtn("▶",  e -> gotoStep(Math.min(record.moves.size(), currentStep+1)));
         lastBtn  = makeNavBtn("▶|", e -> gotoStep(record.moves.size()));
+        JButton flipBtn = new JButton("⇅ 翻转棋盘");
+        flipBtn.setFont(new Font("宋体", Font.PLAIN, 11));
+        flipBtn.addActionListener(e -> {
+            boardFlipped = !boardFlipped;
+            boardPanel.repaint();
+        });
         nav.add(firstBtn); nav.add(prevBtn); nav.add(nextBtn); nav.add(lastBtn);
+        nav.add(new JLabel()); nav.add(flipBtn); nav.add(new JLabel()); nav.add(new JLabel());
 
         // AI分析按钮
         analyzeBtn = new JButton("🤖 AI分析本步");
@@ -442,6 +453,12 @@ public class ReviewPanel extends JPanel {
     }
 
     // =====================================================================
+    // 坐标翻转辅助（逻辑行/列 → 屏幕行/列）
+    // =====================================================================
+    private int toScreenRow(int logicRow) { return boardFlipped ? 9 - logicRow : logicRow; }
+    private int toScreenCol(int logicCol) { return boardFlipped ? 8 - logicCol : logicCol; }
+
+    // =====================================================================
     // 绘制棋盘
     // =====================================================================
     private void drawBoard(Graphics2D g) {
@@ -464,14 +481,22 @@ public class ReviewPanel extends JPanel {
         int fontSize = Math.max(10, (int)(C * 16.0 / CELL));
         g.setFont(new Font("宋体", Font.BOLD, fontSize));
         g.setColor(new Color(0x5C3317));
-        g.drawString("楚  河", OX+M+C,   OY+M+4*C+(int)(C*0.42));
-        g.drawString("汉  界", OX+M+5*C, OY+M+4*C+(int)(C*0.42));
-        // 高亮当前步的走法
+        // 楚河汉界：翻转时左右互换
+        if (!boardFlipped) {
+            g.drawString("楚  河", OX+M+C,   OY+M+4*C+(int)(C*0.42));
+            g.drawString("汉  界", OX+M+5*C, OY+M+4*C+(int)(C*0.42));
+        } else {
+            g.drawString("汉  界", OX+M+C,   OY+M+4*C+(int)(C*0.42));
+            g.drawString("楚  河", OX+M+5*C, OY+M+4*C+(int)(C*0.42));
+        }
+        // 高亮当前步的走法（使用屏幕坐标）
         if (currentStep > 0) {
             int[] mv = record.moves.get(currentStep - 1);
+            int sr0 = toScreenRow(mv[0]), sc0 = toScreenCol(mv[1]);
+            int sr2 = toScreenRow(mv[2]), sc2 = toScreenCol(mv[3]);
             g.setColor(new Color(160, 210, 80, 100));
-            g.fillOval(OX+M+mv[1]*C-R, OY+M+mv[0]*C-R, R*2, R*2);
-            g.fillOval(OX+M+mv[3]*C-R, OY+M+mv[2]*C-R, R*2, R*2);
+            g.fillOval(OX+M+sc0*C-R, OY+M+sr0*C-R, R*2, R*2);
+            g.fillOval(OX+M+sc2*C-R, OY+M+sr2*C-R, R*2, R*2);
         }
     }
 
@@ -481,7 +506,8 @@ public class ReviewPanel extends JPanel {
         for (int r=0;r<10;r++) for (int c=0;c<9;c++) {
             Piece p = board.grid[r][c];
             if (p==null) continue;
-            int cx=OX+M+c*C, cy=OY+M+r*C;
+            int sr = toScreenRow(r), sc = toScreenCol(c);
+            int cx=OX+M+sc*C, cy=OY+M+sr*C;
             Color bg     = p.isRed ? new Color(0xFFD700) : new Color(0xF0DEB0);
             Color border = p.isRed ? new Color(0xB22222) : new Color(0x333333);
             Color text   = p.isRed ? new Color(0xB22222) : new Color(0x111111);
