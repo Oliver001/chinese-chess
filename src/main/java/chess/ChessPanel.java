@@ -539,6 +539,18 @@ public class ChessPanel extends JPanel {
         loadFenItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
         loadFenItem.addActionListener(e -> loadFEN());
 
+        JMenuItem copyNotaItem = new JMenuItem("复制棋谱(C)");
+        copyNotaItem.setMnemonic('C');
+        copyNotaItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_C,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
+        copyNotaItem.addActionListener(e -> copyNotation());
+
+        JMenuItem importNotaItem = new JMenuItem("从文字摆放棋局(I)");
+        importNotaItem.setMnemonic('I');
+        importNotaItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_I,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
+        importNotaItem.addActionListener(e -> importNotation());
+
         // 保存/加载对局（继续对局）
         JMenuItem saveGameItem = new JMenuItem("保存棋局(Ctrl+W)");
         saveGameItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_W, InputEvent.CTRL_DOWN_MASK));
@@ -585,6 +597,9 @@ public class ChessPanel extends JPanel {
         gameMenu.add(new JSeparator());
         gameMenu.add(saveFenItem);
         gameMenu.add(loadFenItem);
+        gameMenu.add(new JSeparator());
+        gameMenu.add(copyNotaItem);
+        gameMenu.add(importNotaItem);
         gameMenu.add(new JSeparator());
         gameMenu.add(exitItem);
 
@@ -1403,6 +1418,102 @@ public class ChessPanel extends JPanel {
         updateNotation();
         setStatus("已读取局面", true);
         boardPanel.repaint();
+    }
+
+    // ===================== 棋谱文本复制 & 导入 =====================
+
+    /** 复制当前对局棋谱为文本，可粘贴给他人用于摆放棋局 */
+    private void copyNotation() {
+        if (gs.notations.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "当前对局暂无棋谱记录。",
+                    "复制棋谱", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String text = GameState.toNotationText(gs.notations);
+        JTextArea ta = new JTextArea(text, 12, 36);
+        ta.setLineWrap(false);
+        ta.setEditable(true);
+        ta.setFont(new Font("宋体", Font.PLAIN, 14));
+        ta.selectAll();
+        // 同时写入系统剪贴板
+        try {
+            java.awt.datatransfer.StringSelection sel =
+                    new java.awt.datatransfer.StringSelection(text);
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(sel, null);
+        } catch (Exception ignored) {}
+        JScrollPane sp = new JScrollPane(ta);
+        sp.setPreferredSize(new java.awt.Dimension(400, 280));
+        JOptionPane.showMessageDialog(this, sp,
+                "棋谱已复制到剪贴板（共 " + gs.notations.size() + " 步）",
+                JOptionPane.PLAIN_MESSAGE);
+    }
+
+    /** 从文字棋谱解析并重放，将棋局设置到对应局面 */
+    private void importNotation() {
+        JTextArea ta = new JTextArea(12, 36);
+        ta.setLineWrap(false);
+        ta.setFont(new Font("宋体", Font.PLAIN, 14));
+        ta.setToolTipText("每行一步或两步，如：1. 炮二平五  马8进7");
+        JScrollPane sp = new JScrollPane(ta);
+        sp.setPreferredSize(new java.awt.Dimension(400, 280));
+        JPanel panel = new JPanel(new java.awt.BorderLayout(4, 6));
+        panel.add(new JLabel("<html><b>粘贴棋谱文字</b>（支持格式：1. 炮二平五  马8进7）</html>"),
+                java.awt.BorderLayout.NORTH);
+        panel.add(sp, java.awt.BorderLayout.CENTER);
+        JLabel hint = new JLabel("<html><font color='#888888' size='2'>" +
+                "每行可含1-2步，用2个以上空格分隔；红方先走。</font></html>");
+        panel.add(hint, java.awt.BorderLayout.SOUTH);
+
+        int ok = JOptionPane.showConfirmDialog(this, panel,
+                "从文字摆放棋局", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (ok != JOptionPane.OK_OPTION) return;
+        String text = ta.getText().trim();
+        if (text.isEmpty()) return;
+
+        GameState.NotationParseResult result = GameState.parseNotationText(text);
+        if (result.errorStep >= 0) {
+            JOptionPane.showMessageDialog(this,
+                    "棋谱解析失败：" + result.errorMsg + "\n\n" +
+                    "请检查格式是否正确（如\"炮二平五\"、\"马8进7\"）。",
+                    "解析失败", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 询问是否继续对弈或仅复盘
+        String[] opts = {"继续对弈", "仅摆局（不走棋）", "取消"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "成功解析 " + result.notations.size() + " 步棋谱，到达该局面后：",
+                "导入棋谱", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, opts, opts[0]);
+        if (choice == 2 || choice < 0) return;
+
+        // 应用棋盘状态
+        idleMode = false;
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 9; c++)
+                gs.board.grid[r][c] = result.board.grid[r][c] != null
+                        ? result.board.grid[r][c].copy() : null;
+        gs.redTurn = result.redTurn;
+        gs.gameOver = (choice == 1); // 仅摆局时标为结束，不触发AI
+        gs.history.clear();
+        gs.notations.clear();
+        gs.notations.addAll(result.notations);
+        selRow = -1; selCol = -1; legalMoves = null;
+        lastFR = -1; lastFC = -1; lastTR = -1; lastTC = -1;
+        renderSnapshot = null;
+        aiThinking = false;
+        animTimer.stop();
+
+        updateNotation();
+        updateAdvantage(Evaluator.evaluate(gs.board));
+        setStatus("已导入棋谱（" + result.notations.size() + " 步），"
+                + (gs.redTurn ? "红" : "黑") + "方走", true);
+        boardPanel.repaint();
+
+        // 继续对弈时，若当前轮到AI走棋则触发AI
+        if (choice == 0 && !gs.gameOver && gs.redTurn != gs.humanIsRed) {
+            SwingUtilities.invokeLater(this::triggerAI);
+        }
     }
 
     // ===================== 加载棋局（继续对弈 / 复盘分析） =====================

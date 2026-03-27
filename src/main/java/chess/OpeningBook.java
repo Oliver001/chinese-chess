@@ -106,14 +106,10 @@ public class OpeningBook {
                         !resp.startsWith("checkmate") && !resp.startsWith("stalemate")) {
 
                         int[] mv = parseBestFromQueryAll(resp);
-                        if (mv != null) {
-                            // 合法性验证：起点有棋子且颜色正确
-                            Piece movingPiece = board.getPiece(mv[0], mv[1]);
-                            if (movingPiece != null && movingPiece.isRed == isRed) {
-                                return new LookupResult(mv, true);
-                            }
-                            // 云库走法非法，静默回退到本地库
+                        if (mv != null && isLegalMove(board, mv, isRed)) {
+                            return new LookupResult(mv, true);
                         }
+                        // 云库走法非法，静默回退到本地库
                     }
                 } else {
                     conn.disconnect();
@@ -205,6 +201,29 @@ public class OpeningBook {
         int tr = ucci.charAt(3) - '0';
         if (fc<0||fc>8||fr<0||fr>9||tc<0||tc>8||tr<0||tr>9) return null;
         return new int[]{fr, fc, tr, tc};
+    }
+
+    /**
+     * 验证走法是否在象棋规则上合法：
+     * 1. 起点有棋子且属于 isRed 方
+     * 2. 终点出现在 getLegalMoves(fr, fc) 列表中（满足棋子走法规则且不自将）
+     * 注意：board 对象在验证过程中会被临时修改再还原（getLegalMoves内部逻辑），
+     *       为安全起见此处在副本上操作。
+     */
+    private static boolean isLegalMove(Board board, int[] mv, boolean isRed) {
+        if (mv == null || mv.length < 4) return false;
+        int fr = mv[0], fc = mv[1], tr = mv[2], tc = mv[3];
+        Piece movingPiece = board.getPiece(fr, fc);
+        if (movingPiece == null || movingPiece.isRed != isRed) return false;
+        // 调用 getLegalMoves 会在 board 上做 move/undo，需要用副本以避免并发问题
+        Board copy = new Board();
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 9; c++)
+                copy.grid[r][c] = board.grid[r][c] != null ? board.grid[r][c].copy() : null;
+        for (int[] legal : copy.getLegalMoves(fr, fc)) {
+            if (legal[0] == tr && legal[1] == tc) return true;
+        }
+        return false;
     }
 
 

@@ -408,5 +408,135 @@ public class GameState {
     private static String chNumStatic(int n) {
         return n>=0&&n<=9 ? new String[]{"零","一","二","三","四","五","六","七","八","九"}[n] : String.valueOf(n);
     }
+
+    // =====================================================================
+    // 棋谱文本导出 & 导入
+    // =====================================================================
+
+    /**
+     * 将棋谱列表导出为可分享的文本格式。
+     * 格式示例：
+     *   1. 炮二平五  马8进7
+     *   2. 马二进三  马2进3
+     *   3. 车一平二
+     */
+    public static String toNotationText(List<String> notations) {
+        if (notations == null || notations.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        int round = 1;
+        for (int i = 0; i < notations.size(); i += 2) {
+            String red = notations.get(i);
+            String black = (i + 1 < notations.size()) ? notations.get(i + 1) : "";
+            if (black.isEmpty()) {
+                sb.append(round).append(". ").append(red).append("\n");
+            } else {
+                sb.append(round).append(". ").append(red).append("  ").append(black).append("\n");
+            }
+            round++;
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 棋谱解析结果：棋盘状态 + 走棋方 + 已重放的走法列表
+     */
+    public static class NotationParseResult {
+        public final Board board;
+        public final boolean redTurn;
+        public final List<String> notations;
+        public final List<int[]> moves;   // {fr,fc,tr,tc}
+        public final int errorStep;       // -1=全部成功，否则为出错步骤号(1-based)
+        public final String errorMsg;
+
+        public NotationParseResult(Board board, boolean redTurn,
+                                   List<String> notations, List<int[]> moves,
+                                   int errorStep, String errorMsg) {
+            this.board = board;
+            this.redTurn = redTurn;
+            this.notations = notations;
+            this.moves = moves;
+            this.errorStep = errorStep;
+            this.errorMsg = errorMsg;
+        }
+    }
+
+    /**
+     * 将文本棋谱解析并重放，返回最终棋盘状态。
+     * 支持输入格式（宽松匹配）：
+     *   - "1. 炮二平五  马8进7" （带回合号）
+     *   - "炮二平五" （纯走法，每行一步）
+     *   - 行内多步走法用2个以上空格或制表符分隔
+     * 红方先走，偶数步为黑方，奇数步为红方。
+     */
+    public static NotationParseResult parseNotationText(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return new NotationParseResult(null, true, null, null, 0, "输入为空");
+        }
+
+        // 提取所有走法token（去掉回合号）
+        List<String> tokens = new ArrayList<>();
+        for (String line : text.split("[\r\n]+")) {
+            line = line.trim();
+            if (line.isEmpty()) continue;
+            // 去掉开头的回合号 "1." / "1、" / "（1）" 等
+            line = line.replaceAll("^\\d+[.、。）)\\s]+", "").trim();
+            if (line.isEmpty()) continue;
+            // 按2个以上空格或tab分割每行内的多步
+            String[] parts = line.split("[ \t]{2,}");
+            for (String p : parts) {
+                p = p.trim();
+                // 过滤掉仅含数字/标点的片段
+                if (!p.isEmpty() && p.length() >= 4) tokens.add(p);
+            }
+        }
+
+        if (tokens.isEmpty()) {
+            return new NotationParseResult(null, true, null, null, 0, "未能识别任何走法");
+        }
+
+        Board board = new Board();
+        boolean redTurn = true;
+        List<String> notations = new ArrayList<>();
+        List<int[]> moves = new ArrayList<>();
+
+        for (int i = 0; i < tokens.size(); i++) {
+            String notation = tokens.get(i);
+            int[] mv = notationToMove(board, notation, redTurn);
+            if (mv == null) {
+                return new NotationParseResult(board, redTurn, notations, moves,
+                        i + 1, "第" + (i + 1) + "步「" + notation + "」无法识别或不合法");
+            }
+            board.move(mv[0], mv[1], mv[2], mv[3]);
+            notations.add(notation);
+            moves.add(mv);
+            redTurn = !redTurn;
+        }
+
+        return new NotationParseResult(board, redTurn, notations, moves, -1, null);
+    }
+
+    /**
+     * 将单步中文棋谱（如"炮二平五"、"马8进7"）转换为内部坐标 {fr,fc,tr,tc}。
+     * 通过枚举当前走棋方所有合法走法，找出与棋谱匹配的那一步。
+     * 返回 null 表示解析失败或不合法。
+     */
+    private static int[] notationToMove(Board board, String nota, boolean isRed) {
+        if (nota == null || nota.length() < 4) return null;
+        // 枚举当前方所有合法走法，生成对应棋谱，与 nota 比对
+        for (int r = 0; r < 10; r++) {
+            for (int c = 0; c < 9; c++) {
+                Piece p = board.getPiece(r, c);
+                if (p == null || p.isRed != isRed) continue;
+                Piece[][] snap = board.copyGrid();
+                for (int[] mv : board.getLegalMoves(r, c)) {
+                    String gen = buildNotationStatic(r, c, mv[0], mv[1], snap, isRed);
+                    if (nota.equals(gen)) {
+                        return new int[]{r, c, mv[0], mv[1]};
+                    }
+                }
+            }
+        }
+        return null;
+    }
 }
 
