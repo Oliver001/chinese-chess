@@ -56,7 +56,7 @@ public class Evaluator {
             score += p.isRed ? v : -v;
         }
         // ── Hanging piece 惩罚：被对方攻击且未被己方保护的棋子扣分 ──────────────
-        // 只惩罚车、马、炮（高价值棋子送子问题最多），象/仕/卒不计（价值低，容忍度高）
+        // 惩罚所有棋子（含卒/仕/象），将不计入（由将死分值处理）
         score += hangingPenalty(board, true)   // 红方悬空子 → 负值（对红不利）
                + hangingPenalty(board, false);  // 黑方悬空子 → 正值（对红有利）
         return score;
@@ -65,7 +65,11 @@ public class Evaluator {
     /**
      * 计算 isRed 方棋子中悬空棋子（被对方攻击且未被己方保护）的代价。
      * 返回值：从红方视角计算（isRed=true 返回负值惩罚红，isRed=false 返回正值惩罚黑）。
-     * 惩罚约为 min(攻击者价值, 被吃子价值) * 系数（仅估计，不做完整SEE）。
+     *
+     * 修复说明（v18）：
+     * 1. 覆盖所有棋子（含卒/仕/象），将除外（由将死分值处理）
+     * 2. 移除提前退出 break，完整扫描所有棋子，找到价值最低的攻击者（SEE估计更准确）
+     * 3. 惩罚系数提高：无保护 90%，有保护但可吃 70% 净亏损
      */
     private static int hangingPenalty(Board board, boolean isRed) {
         int penalty = 0;
@@ -73,10 +77,10 @@ public class Evaluator {
             for (int c = 0; c < 9; c++) {
                 Piece p = board.getPiece(r, c);
                 if (p == null || p.isRed != isRed) continue;
-                // 只关注高价值棋子
-                if (p.type == Piece.Type.KING || p.type == Piece.Type.PAWN
-                        || p.type == Piece.Type.ADVISOR || p.type == Piece.Type.ELEPHANT) continue;
-                // 一次扫描同时统计攻击者和保护者
+                // 将不计入（由将死/被将分值处理）
+                if (p.type == Piece.Type.KING) continue;
+                // 完整扫描所有棋子，统计攻击者（含最低价值）和保护者
+                // 注意：不提前退出，确保 minAtkVal 是所有攻击者中的最小值
                 int atkCount = 0, minAtkVal = Integer.MAX_VALUE;
                 boolean defended = false;
                 for (int rr = 0; rr < 10; rr++) {
@@ -93,21 +97,20 @@ public class Evaluator {
                                 } else { // 己方保护者
                                     defended = true;
                                 }
-                                break;
+                                break; // 每个棋子只需确认一次能否攻击目标
                             }
                         }
-                        if (atkCount > 0 && defended) break; // 已足够信息可提前退出内层
+                        // 不在此处提前退出，继续扫描以找到所有攻击者中价值最低的
                     }
-                    if (atkCount > 0 && defended) break;
                 }
                 if (atkCount == 0) continue; // 未被攻击，跳过
                 int myVal = baseVal(p.type);
                 if (!defended) {
-                    // 无保护，完全悬空：惩罚80%的棋子价值
-                    penalty += myVal * 4 / 5;
+                    // 无保护，完全悬空：惩罚90%的棋子价值（提高警惕性）
+                    penalty += myVal * 9 / 10;
                 } else if (minAtkVal < myVal) {
-                    // 有保护但攻击者价值更低，以小换大风险，惩罚50%净亏损
-                    penalty += (myVal - minAtkVal) / 2;
+                    // 有保护但攻击者价值更低（以小换大），惩罚70%净亏损
+                    penalty += (myVal - minAtkVal) * 7 / 10;
                 }
             }
         }
