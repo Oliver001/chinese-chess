@@ -132,14 +132,18 @@ public class OpeningBook {
      * 格式：move:b2e2,score:1,rank:2,note:...,winrate:50.08|move:...
      *
      * 策略：
-     *   1. 过滤掉 score=?? 的未知走法
-     *   2. 在已知走法中取 rank 最小（最优）
-     *   3. rank 相同时随机选一个（增加变化性）
+     *   1. score 有具体值的走法优先（rank 直接用）
+     *   2. score=?? 的走法 rank 加 1000 降级（兜底，不丢弃）
+     *   3. 所有走法中取调整后 rank 最小的，相同时随机选一个
+     *
+     * 修复说明（v19）：
+     *   原来 scoreKnown=true 是必要条件，冷门局面（score=??）整批走法被丢弃，
+     *   导致"开局库只生效一步"。现在 score=?? 的走法通过降级 rank+1000 保留为兜底选项。
      */
     private static int[] parseBestFromQueryAll(String resp) {
         try {
             String[] entries = resp.trim().split("\\|");
-            // {moveStr, rank} 的已知走法列表
+            // {moveStr, adjustedRank} 的所有走法列表
             List<String[]> known = new ArrayList<>();
             int bestRank = Integer.MAX_VALUE;
 
@@ -163,10 +167,11 @@ public class OpeningBook {
                     }
                 }
 
-                if (moveStr != null && scoreKnown &&
-                    moveStr.matches("[a-i][0-9][a-i][0-9]")) {
-                    // rank 缺失时给默认值 999（低优先级但不丢弃走法）
+                if (moveStr != null && moveStr.matches("[a-i][0-9][a-i][0-9]")) {
+                    // rank 缺失时给默认值 999
                     if (rank == Integer.MAX_VALUE) rank = 999;
+                    // score=?? 降级：rank+1000（有具体 score 的走法优先）
+                    if (!scoreKnown) rank += 1000;
                     if (rank < bestRank) bestRank = rank;
                     known.add(new String[]{moveStr, String.valueOf(rank)});
                 }
