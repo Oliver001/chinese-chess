@@ -158,25 +158,8 @@ public class AIEngine {
         currentBoard = board;
         currentAiIsRed = aiIsRed;
 
-        // 1. 查开局/云库
-        OpeningBook.LookupResult bookResult = OpeningBook.lookupWithSource(board, aiIsRed);
-        if (bookResult != null) {
-            int[] bmv = bookResult.move;
-            // 验证走法合法性：起点有棋子且属于当前走棋方
-            chess.Piece movingPiece = board.getPiece(bmv[0], bmv[1]);
-            boolean valid = movingPiece != null && movingPiece.isRed == aiIsRed
-                    && bmv[2] >= 0 && bmv[2] <= 9 && bmv[3] >= 0 && bmv[3] <= 8;
-            if (valid) {
-                stats.source = bookResult.fromCloud ? MoveSource.CLOUD_BOOK : MoveSource.LOCAL_BOOK;
-                stats.elapsedMs = System.currentTimeMillis() - startTime;
-                stats.bestMove = bmv;
-                notifyStats();
-                return bmv;
-            }
-            // 开局库走法非法，降级到AI搜索
-        }
-
-        // 2. 清历史/杀手表（置换表跨步保留，复用 TT 价值）
+        // 1. 清历史/杀手表（置换表跨步保留，复用 TT 价值）
+        // 注意：开局库查询已在 ChessPanel.triggerBuiltinAI() 中完成，此处只负责 AI 搜索。
         for (int t = 0; t <= THREAD_COUNT; t++) {
             for (int[][][] a : histTable[t]) for (int[][] b : a) for (int[] c : b) Arrays.fill(c, 0);
             for (int[] k : killer1[t]) Arrays.fill(k, -1);

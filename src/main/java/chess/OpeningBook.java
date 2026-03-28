@@ -164,7 +164,9 @@ public class OpeningBook {
                 }
 
                 if (moveStr != null && scoreKnown &&
-                    moveStr.matches("[a-i][0-9][a-i][0-9]") && rank != Integer.MAX_VALUE) {
+                    moveStr.matches("[a-i][0-9][a-i][0-9]")) {
+                    // rank 缺失时给默认值 999（低优先级但不丢弃走法）
+                    if (rank == Integer.MAX_VALUE) rank = 999;
                     if (rank < bestRank) bestRank = rank;
                     known.add(new String[]{moveStr, String.valueOf(rank)});
                 }
